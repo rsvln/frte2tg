@@ -480,62 +480,54 @@ namespace frte2tg
 
         async static Task TgHandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
-            if (update.Message is not { } message)
-                return;
-            if (message.Text is not { } messageText)
-                return;
+              if (update.Message is not { } message)
+                  return;
+              if (message.Text is not { } messageText)
+                  return;
+              
+              if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
+              {
+                  await botClient.SendTextMessageAsync(chatId: message.Chat.Id.ToString(), text: "go away!", cancellationToken: cancellationToken);
+                  return;
+              }
             
-            var chatId = message.Chat.Id;
-            if (!settings.telegram.chatids.Contains(chatId.ToString()))
-            {
-                await botClient.SendTextMessageAsync(chatId: chatId.ToString(), text: "go away!", cancellationToken: cancellationToken);
-                return;
-            }
-
-            if (messageText.ToLower().Contains("/status"))
-            {
-                string sqlq = (new Queries()).getCamerasQuery();
-                SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
-                db.Open();
-                SqliteDataReader dr = (new SqliteCommand(sqlq, db)).ExecuteReader();
-                List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
-                List<string> files = new List<string>();
-                String? tgcaption = "Текущая обстановка";
-
-                if (dr.HasRows)
-                {
-                    int i = 1;
-                    while (dr.Read())
-                    {
-                        string rnd = RandomString(10);
-                        files.Add(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg");
-                        await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg", Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"));
-                        if (i > 1)
-                            tgcaption = null;
-                        InputMediaPhoto imp =  
-                             new InputMediaPhoto(new InputFileStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"), dr["camera"].ToString() + "_" + rnd + ".jpg"))
-                                {
-                                    Caption = tgcaption
-                                };
-                        i++;
-                        md.Add(imp);
-                    }
-                }
-                dr.Close();
-                db.Close();
-                
-                foreach (var chid in settings.telegram.chatids)
-                {
-                    await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: chid, media: md));
-                }
-
-                foreach (var f in files)
-                {
-                    System.IO.File.Delete(f);
-                }
-            }
-
-            return;
+              if (messageText.ToLower().Contains("/status"))
+              {
+                  SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
+                  db.Open();
+                  SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
+                  List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
+            
+                  if (dr.HasRows)
+                  {
+                      int i = 1;
+                      while (dr.Read())
+                      {
+                          string rnd = RandomString(10);
+                          await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg", 
+                                                               Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg")
+                                            );
+                          InputMediaPhoto imp =  
+                               new InputMediaPhoto(new InputFileStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"), dr["camera"].ToString() + "_" + rnd + ".jpg"))
+                                  {
+                                      Caption = (i == 1) ? "Текущая обстановка" : null
+                                  };
+                          i++;
+                          md.Add(imp);
+                          System.IO.File.Delete(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg");
+            
+                      }
+                  }
+                  dr.Close();
+                  db.Close();
+                  
+                  foreach (var chid in settings.telegram.chatids)
+                  {
+                      await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: message.Chat.Id.ToString(), media: md));
+                  }
+              }
+            
+              return;
         }
 
         static Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
