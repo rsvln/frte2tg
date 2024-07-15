@@ -44,9 +44,9 @@ namespace frte2tg
                                                          start_time
                                                   FROM event
                                                   WHERE id = '" + id + @"' ) e ON r.camera = e.camera
-                                               AND e.start_time >= r.start_time
-                                               ORDER BY r.start_time DESC
-                                               LIMIT 1) rs ON r.start_time >= rs.start_time
+                                               AND r.start_time >= e.start_time
+                                               ORDER BY r.start_time ASC
+                                               LIMIT 1) rs ON cast(r.start_time as int) >= cast(rs.start_time as int)
                                             AND r.camera=rs.camera
                                             JOIN
                                               (SELECT r.end_time,
@@ -56,10 +56,10 @@ namespace frte2tg
                                                  (SELECT end_time,
                                                          camera
                                                   FROM event
-                                                  WHERE id = '" + id + @"' ) e ON r.camera = e.camera
+                                                  WHERE id = '" + id + @"') e ON r.camera = e.camera
                                                AND e.end_time <= r.end_time
                                                ORDER BY r.end_time ASC
-                                               LIMIT 1) re ON r.end_time <= re.end_time
+                                               LIMIT 1) re ON cast(r.end_time as int) <= cast(re.end_time as int)
                                             AND r.camera=re.camera
                                             ORDER BY r.start_time ASC;";
 
