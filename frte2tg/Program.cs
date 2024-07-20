@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Reflection;
 using System.Net;
 using Microsoft.Data.Sqlite;//Microsoft.EntityFrameworkCore.Sqlite
@@ -32,15 +32,17 @@ namespace frte2tg
         public static MqttFactory mqttFactory;
         public static IMqttClient mqttClient;
         public static MqttClientOptions mqttOptions;
+        public static string AppLocation;
 
         static async Task Main(string[] args)
         {
 
+            AppLocation = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
             settings = new SettingsFile();
             string fs;
             if (args.Length == 0)
                 fs = "/etc/frte2tg" 
-                    //Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) 
+                    //AppLocation 
                    + "/frte2tg.yml";
             else
                 fs = args[0];
@@ -150,7 +152,7 @@ namespace frte2tg
                 if (fe.after.has_clip)
                 {
                     int secs = 0;
-                    string sqlq = (new Queries()).getEventQuery(fe.after.id);
+                    string sqlq = new Queries().getEventQuery(fe.after.id);
                     SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
                     bool isSuccess = false;
 
@@ -197,25 +199,24 @@ namespace frte2tg
                                         size = (new FileInfo(dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath))).Length
                                     });
 
-                                    clipsize += (new FileInfo(dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath))).Length;
+                                    clipsize += dl.Last().size;
                                     //clipduration += (double)dr["duration"];
                                 }
 
                                 db.Close();
                                 Thread.Sleep(10);
 
-                                double clip_start_time = dl.MinBy(x => x.start_time).start_time;
-                                double clip_end_time = dl.MaxBy(x => x.end_time).end_time;
-
-                                //недокументированный метод!
+                                //недокументированный метод! для мемо
                                 /*
+                                
                                 await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/"
                                                                             + dr["camera"].ToString()
-                                                                            + "/start/" + clip_start_time.ToString()
-                                                                            + "/end/" + clip_end_time.ToString()
+                                                                            + "/start/" + dl.MinBy(x => x.start_time).start_time.ToString()
+                                                                            + "/end/" + dl.MaxBy(x => x.end_time).end_time.ToString()
                                                                             + "/clip.mp4",
-                                                                     Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".mp4"));
+                                                                     AppLocation + "/" + fe.after.id + ".mp4"));
                                 */
+
                                 int partid = 1;
                                 if (clipsize > settings.telegram.clipsizecheck)
                                 {
@@ -240,10 +241,10 @@ namespace frte2tg
                                                 lines.Add("file '" + dl[k].realpath + "'");
                                             }
 
-                                            System.IO.File.WriteAllLines(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".txt", lines);
-                                            string strCmdText = "-y -hide_banner -loglevel error -f concat -safe 0 " +
-                                                                "-i \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".txt" + "\" " +
-                                                                "-c copy \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".mp4" + "\"";
+                                            System.IO.File.WriteAllLines(AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".txt", lines);
+                                            string strCmdText =   "-y -hide_banner -loglevel error -f concat -safe 0 "
+                                                                + "-i \"" + AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".txt" + "\" "
+                                                                + "-c copy \"" + AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".mp4" + "\"";
                                             var process = System.Diagnostics.Process.Start("ffmpeg" /*settings.ffmpeg.path*/, strCmdText);
                                             process.WaitForExit();
                                             process.Kill();
@@ -262,10 +263,10 @@ namespace frte2tg
                                             lines.Add("file '" + dl[k].realpath + "'");
                                         }
 
-                                        System.IO.File.WriteAllLines(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".txt", lines);
-                                        string strCmdText = "-y -hide_banner -loglevel error -f concat -safe 0 " +
-                                                            "-i \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".txt" + "\" " +
-                                                            "-c copy \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + partid.ToString() + ".mp4" + "\"";
+                                        System.IO.File.WriteAllLines(AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".txt", lines);
+                                        string strCmdText =   "-y -hide_banner -loglevel error -f concat -safe 0 "
+                                                            + "-i \"" + AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".txt" + "\" "
+                                                            + "-c copy \"" + AppLocation + "/" + fe.after.id + "-part" + partid.ToString() + ".mp4" + "\"";
                                         var process = System.Diagnostics.Process.Start("ffmpeg" /*settings.ffmpeg.path*/, strCmdText);
                                         process.WaitForExit();
                                         process.Kill();
@@ -279,98 +280,43 @@ namespace frte2tg
                                     {
                                         lines.Add("file '" + dl[k].realpath + "'");
                                     }
-                                    System.IO.File.WriteAllLines(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".txt", lines);
-                                    string strCmdText = "-y -hide_banner -loglevel error -f concat -safe 0 " +
-                                                        "-i \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".txt" + "\" " +
-                                                        "-c copy \"" + Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".mp4" + "\"";
+                                    System.IO.File.WriteAllLines(AppLocation + "/" + fe.after.id + ".txt", lines);
+                                    string strCmdText =   "-y -hide_banner -loglevel error -f concat -safe 0 "
+                                                        + "-i \"" + AppLocation + "/" + fe.after.id + ".txt" + "\" "
+                                                        + "-c copy \"" + AppLocation + "/" + fe.after.id + ".mp4" + "\"";
                                     var process = System.Diagnostics.Process.Start("ffmpeg", strCmdText);
                                     process.WaitForExit();
                                     process.Kill();
 
                                 }
 
-                                if (partid == 1)
-                                    Log(fe.after.id, "File is prepared by ffmpeg for sending");
-                                else
-                                    Log(fe.after.id, partid.ToString() + " files are prepared by ffmpeg for sending");
-
+                                Log(fe.after.id, ((partid == 1) ? "File is prepared by ffmpeg for sending" : partid.ToString() + " files are prepared by ffmpeg for sending"));
                                 Thread.Sleep(settings.options.retry * 100);
-                                int x = 0;
+
                                 foreach (var chid in settings.telegram.chatids)
                                 {
-                                    x++;
-                                    if (partid == 1)
-                                    {
-                                        string tgcaption = "";
-                                        if (firstmessageid != -1)
-                                        {
-                                            tgcaption = "```" + fe.after.id + "``` видео";
-                                            await bot.SendVideoAsync(
-                                                     chatId: chid,
-                                                     video: InputFile.FromStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".mp4")),
-                                                     caption: tgcaption,
-                                                     supportsStreaming: true,
-                                                     parseMode: ParseMode.Markdown,
-                                                     replyToMessageId: firstmessageid);
-
-                                        }
-                                        else
-                                        {
-                                            tgcaption = "```" + fe.after.id + " видео\n" +
-                                                        "Камера: " + fe.after.camera + "\n" +
-                                                        "Объект: " + rulabel + "\n" +
-                                                        "Время: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                                        "Событие: " + fe.after.id + "```";
-                                            await bot.SendVideoAsync(
-                                                      chatId: chid,
-                                                      video: InputFile.FromStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".mp4")),
-                                                      caption: tgcaption,
-                                                      supportsStreaming: true,
-                                                      parseMode: ParseMode.Markdown);
-                                        }
-
-                                        Thread.Sleep(100);
-                                        System.IO.File.Delete(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + ".txt");
-                                        Log(fe.after.id, "The clip was sent to telegram chat " + chid.ToString());
-
-                                    }
-                                    else
-                                    {
                                         for (int i = 1; i <= partid; i++)
                                         {
-                                            string tgcaption = "";
+                                            string tgcaption = (firstmessageid != -1) ?
+                                                               "```" + fe.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + "``` видео" :
+                                                               "```" + fe.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео\n" +
+                                                               "Камера: " + fe.after.camera + "\n" +
+                                                               "Объект: " + rulabel + "\n" +
+                                                               "Время: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                                               "Событие: " + fe.after.id + "```";
 
-                                            if (firstmessageid == -1)
-                                            {
-
-                                                tgcaption = "```" + fe.after.id + "[" + i.ToString() + "]" + " видео\n" +
-                                                            "Камера: " + fe.after.camera + "\n" +
-                                                            "Объект: " + rulabel + "\n" +
-                                                            "Время: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                                            "Событие: " + fe.after.id + "```";
-                                                await bot.SendVideoAsync(
-                                                 chatId: chid,
-                                                 video: InputFile.FromStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + i.ToString() + ".mp4")),
-                                                 caption: tgcaption,
-                                                 supportsStreaming: true,
-                                                 parseMode: ParseMode.Markdown);
-                                            }
-                                            else
-                                            {
-                                                tgcaption = "```" + fe.after.id + "[" + i.ToString() + "]" + "``` видео";
-                                                await bot.SendVideoAsync(
+                                            await bot.SendVideoAsync(
                                                     chatId: chid,
-                                                    video: InputFile.FromStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + i.ToString() + ".mp4")),
+                                                    video: InputFile.FromStream(System.IO.File.OpenRead(AppLocation + "/" + fe.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4")),
                                                     caption: tgcaption,
                                                     supportsStreaming: true,
                                                     parseMode: ParseMode.Markdown,
-                                                    replyToMessageId: firstmessageid);
-                                            }
+                                                    replyToMessageId: (firstmessageid != -1) ? firstmessageid : null);
 
-                                            System.IO.File.Delete(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + fe.after.id + "-part" + i.ToString() + ".txt");
-                                            Log(fe.after.id, "The clip #" + i.ToString() + " was sent to telegram chat " + chid.ToString());
+                                            Thread.Sleep(100);
+                                            System.IO.File.Delete(AppLocation + "/" + fe.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".txt");
+                                            Log(fe.after.id, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
                                         }
-                                    }
                                 }
 
                                 break;
@@ -480,54 +426,59 @@ namespace frte2tg
 
         async static Task TgHandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
-              if (update.Message is not { } message)
-                  return;
-              if (message.Text is not { } messageText)
-                  return;
-              
-              if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
-              {
-                  await botClient.SendTextMessageAsync(chatId: message.Chat.Id.ToString(), text: "go away!", cancellationToken: cancellationToken);
-                  return;
-              }
+            if (update.Message is not { } message)
+                return;
+            if (message.Text is not { } messageText)
+                return;
             
-              if (messageText.ToLower().Contains("/status"))
-              {
-                  SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
-                  db.Open();
-                  SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
-                  List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
-            
-                  if (dr.HasRows)
-                  {
-                      int i = 1;
-                      while (dr.Read())
-                      {
-                          string rnd = RandomString(10);
-                          await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg", 
-                                                               Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg")
-                                            );
-                          InputMediaPhoto imp =  
-                               new InputMediaPhoto(new InputFileStream(System.IO.File.OpenRead(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"), dr["camera"].ToString() + "_" + rnd + ".jpg"))
-                                  {
-                                      Caption = (i == 1) ? "Текущая обстановка" : null
-                                  };
-                          i++;
-                          md.Add(imp);
-                          System.IO.File.Delete(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg");
-            
-                      }
-                  }
-                  dr.Close();
-                  db.Close();
-                  
-                  foreach (var chid in settings.telegram.chatids)
-                  {
-                      await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: message.Chat.Id.ToString(), media: md));
-                  }
-              }
-            
-              return;
+            if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
+            {
+                await botClient.SendTextMessageAsync(chatId: message.Chat.Id.ToString(), text: "go away!", cancellationToken: cancellationToken);
+                return;
+            }
+
+            if (messageText.ToLower().Contains("/private"))
+            {
+
+            }
+
+            if (messageText.ToLower().Contains("/status"))
+            {
+                SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
+                db.Open();
+                SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
+                List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
+
+                if (dr.HasRows)
+                {
+                    int i = 1;
+                    while (dr.Read())
+                    {
+                        string rnd = RandomString(10);
+                        await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg", 
+                                                             AppLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg")
+                                          );
+                        InputMediaPhoto imp =  
+                             new InputMediaPhoto(new InputFileStream(System.IO.File.OpenRead(AppLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"), dr["camera"].ToString() + "_" + rnd + ".jpg"))
+                                {
+                                    Caption = (i == 1) ? "Текущая обстановка" : null
+                                };
+                        i++;
+                        md.Add(imp);
+                        System.IO.File.Delete(AppLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg");
+
+                    }
+                }
+                dr.Close();
+                db.Close();
+                
+                foreach (var chid in settings.telegram.chatids)
+                {
+                    await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: message.Chat.Id.ToString(), media: md));
+                }
+            }
+
+            return;
         }
 
         static Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
@@ -546,8 +497,7 @@ namespace frte2tg
         private static Random random = new Random();
         public static string RandomString(int length)
         {
-            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            return new string(Enumerable.Repeat(chars, length).Select(s => s[random.Next(s.Length)]).ToArray());
+            return new string(Enumerable.Repeat("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", length).Select(s => s[random.Next(s.Length)]).ToArray());
         }
 
         public static void Log(string label, string txt)
@@ -560,9 +510,9 @@ namespace frte2tg
 
         public static void FileLog(string label, string txt)
         {
-            //Directory.CreateDirectory(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/logs");
+            //Directory.CreateDirectory(AppLocation + "/logs");
             Directory.CreateDirectory("/var/log/frte2tg/");
-            System.IO.File.AppendAllText(/*Path.GetDirectoryName(Assembly.GetEntryAssembly().Location) + "/logs/"*/ "/var/log/frte2tg/frte2tg_"
+            System.IO.File.AppendAllText(/*AppLocation + "/logs/"*/ "/var/log/frte2tg/frte2tg_"
                                             + DateTime.Now.AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd") + ".log",
                                               DateTime.Now.AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss.fff") + "\t" + label + "\t" + txt + "\n");
         }
