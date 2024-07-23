@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -21,12 +21,12 @@ namespace frte2tg
         {
             return @"select distinct camera
                             from recordings 
-                            where DATETIME(end_time, 'unixepoch') >= datetime('now','-1 hour') 
+                            where DATETIME(end_time, 'unixepoch') >= datetime('now','-24 hour') 
                             order by camera;";
 
         }
 
-        public string getEventQuery(string id)
+        public string getEventQuery(string id, bool strong = true)
         {
             return @"SELECT 
                                             r.camera, 
@@ -47,8 +47,9 @@ namespace frte2tg
                                                AND r.start_time >= e.start_time
                                                ORDER BY r.start_time ASC
                                                LIMIT 1) rs ON cast(r.start_time as int) >= cast(rs.start_time as int)
-                                            AND r.camera=rs.camera
-                                            JOIN
+                                            AND r.camera=rs.camera" +
+                                            (strong ? "" : "LEFT") + 
+                   @"                       JOIN
                                               (SELECT r.end_time,
                                                       r.camera
                                                FROM recordings r
@@ -123,6 +124,7 @@ namespace frte2tg
         public int timeoffset { get; set; }
         public int timeout { get; set; }
         public int retry { get; set; }
+        public bool everythingwhathas { get; set; } = true;
     }
 
     public class LoggerSettings
