@@ -76,6 +76,7 @@ namespace frte2tg
         //public ffmpegSettings ffmpeg { get; set; }
         public Options options { get; set; }
         public LoggerSettings logger { get; set; }
+        public AISettings ai { get; set; }
     }
 
     public class Objects
@@ -148,6 +149,17 @@ namespace frte2tg
     {
         public bool file { get; set; }
         public bool console { get; set; }
+    }
+
+    public class AISettings
+    {
+        public string url { get; set; }
+        public string model { get; set; }
+        public string humanprompt { get; set; }
+        public string nonhumanprompt { get; set; }
+        public int numpredict { get; set; } = 150;
+        public double temperature { get; set; } = 0.1;
+        public int resizetowidth { get; set; } = 640;
     }
 
     public class BeforeAfterFE
@@ -227,7 +239,7 @@ namespace frte2tg
     }
 
 
-    public class dbrow
+    public class DbRow
     {
         public string path { get; set; }
         public double start_time { get; set; }

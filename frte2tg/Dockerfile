@@ -2,10 +2,10 @@
 
 
 FROM debian:bookworm
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0  AS base
 USER root
 WORKDIR /app
-RUN apt-get update && apt-get upgrade -y && apt-get install -y ffmpeg
+RUN apt-get update && apt-get upgrade -y && apt-get install -y ffmpeg curl wget
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
