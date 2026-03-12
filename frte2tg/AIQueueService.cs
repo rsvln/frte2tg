@@ -96,7 +96,6 @@ namespace frte2tg
                     {
                         await semaphore.WaitAsync(cancellationToken);
                         
-                        // Process в отдельном таске чтобы не блокировать очередь
                         _ = Task.Run(async () =>
                         {
                             try
@@ -111,7 +110,7 @@ namespace frte2tg
                     }
                     else
                     {
-                        await Task.Delay(1000, cancellationToken); // Ждём новых задач
+                        await Task.Delay(1000, cancellationToken);
                     }
                 }
                 catch (OperationCanceledException)

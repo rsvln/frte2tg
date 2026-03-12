@@ -35,8 +35,6 @@ namespace frte2tg
         public static string appLocation;
         public static AIQueueService aiQueue;
         public static bool goAI = false;
-        //public static string triggerType = "";
-        //public static string triggerTypeRU;
 
         static async Task Main(string[] args)
         {
@@ -394,16 +392,6 @@ namespace frte2tg
 
                         foreach (var chid in settings.telegram.chatids)
                         {
-
-                            //var tgTask = Task.Run(() =>
-                            //       bot.SendMediaGroupAsync(
-                            //                        chatId: chid,
-                            //                        media: md));
-                            //Task tgcont = tgTask.ContinueWith(x => Thread.Sleep(100));
-                            //tgTask.Wait();
-                            //Message[] msgs = tgTask.Result;
-                            //firstmessages[chid] = msgs[0].MessageId;
-                            //tgTask.Dispose();
 
                             Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
                             await Task.Delay(100);
