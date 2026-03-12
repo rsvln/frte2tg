@@ -1,3 +1,154 @@
 # frte2tg
-https://hub.docker.com/r/rsvln/frte2tg
-<br><br>Frigate's events and reviews sender for Telegram. With very wide possibilities
+
+Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots and video clips to Telegram. Optionally analyzes snapshots with a local AI model via Ollama.
+
+## Features
+
+- Handles both Frigate **events** and **reviews** (configurable per camera)
+- Sends **snapshots** as media groups
+- Concatenates and sends **video clips** via ffmpeg
+- Splits large clips automatically
+- Re-publishes event/review to MQTT with type `trueend` when recordings are fully ready (optional, per camera)
+- AI-powered snapshot descriptions via **Ollama** (optional)
+- Per-camera configuration: objects, zones, severity, triggers, behavior
+- Web UI for log viewing and config editing (port 8888)
+- Runs as a Docker container
+
+## Requirements
+
+- [Frigate NVR](https://frigate.video) with MQTT enabled
+- MQTT broker
+- Telegram bot token + local Bot API server (optional but recommended for large files)
+- ffmpeg available in container
+- Ollama instance with a vision model (optional, for AI descriptions)
+
+## Quick Start
+
+```yaml
+# docker-compose.yml
+services:
+  frte2tg:
+    image: rsvln/frte2tg:latest
+    restart: unless-stopped
+    volumes:
+      - /etc/frte2tg:/etc/frte2tg
+      - /var/log/frte2tg:/var/log/frte2tg
+      - /srv/frigate/clips:/srv/frigate/clips:ro
+      - /srv/frigate/recordings:/srv/frigate/recordings:ro
+      - /srv/frigate/config/frigate.db:/srv/frigate/config/frigate.db:ro
+    ports:
+      - "8888:8888"
+```
+
+## Configuration
+
+Config file: `/etc/frte2tg/frte2tg.yml`
+
+```yaml
+frigate:
+  host: 192.168.1.10
+  port: 5000
+  clipspath: /srv/frigate/clips
+  dbpath: /srv/frigate/config/frigate.db
+  recordingspath: /srv/frigate/recordings
+  recordingsoriginalpath: /media/frigate/recordings
+  cameras:
+    - camera: frontdoor
+      snapshot: true
+      clip: true
+      trueend: false
+      sctogether: false        # send snapshot and clip separately
+      snapshottrigger: new     # new | update | end
+      topic: reviews           # reviews | events
+      severity:
+        - alert
+        - detection
+      objects:
+        - label: person
+          percent: 50
+        - label: dog
+          percent: 70
+      zones: []                # leave empty to ignore zones
+
+mqtt:
+  host: 192.168.1.10
+  port: 1883
+  user: mqtt
+  password: mqtt
+  eventstopic: frigate/events
+  reviewstopic: frigate/reviews
+
+telegram:
+  token: YOUR_BOT_TOKEN
+  chatids:
+    - '-1001234567890'
+  clipsizecheck: 2147483648    # 2GB — if clip exceeds this, split
+  clipsizesplit: 2000000000    # split chunk size
+  mediagrouplimit: 10
+  sendchatstimepause: 30       # seconds between chats when multiple
+  apiserver: http://192.168.1.10:8081/  # local bot API server, leave empty for cloud
+
+options:
+  timeoffset: 0                # minutes to add to UTC for display
+  timeout: 500                 # seconds to wait for recordings to be ready
+  retry: 30                    # polling interval in seconds
+  sendeverythingwhatyouhave: true  # send partial clips if timeout expires
+
+logger:
+  file: true
+  console: true
+
+# Optional: AI snapshot analysis via Ollama
+ai:
+  url: http://192.168.1.20:11434
+  model: "qwen2.5vl:7b"
+  humanprompt: "Кратко опиши что делает человек. Что он держит или несёт? 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
+  nonhumanprompt: "Кратко опиши что происходит. 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
+  numpredict: 150
+  temperature: 0.1
+  resizetowidth: 640           # resize image before sending to Ollama, 0 to disable
+```
+
+### Camera options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `snapshot` | bool | Send snapshots |
+| `clip` | bool | Send video clips |
+| `trueend` | bool | Re-publish event/review to the same MQTT topic with `type: trueend` once all recordings are confirmed ready in Frigate DB. Useful for triggering downstream automations only when the clip is complete. |
+| `sctogether` | bool | Send snapshot and clip in one media group |
+| `snapshottrigger` | string | When to send snapshot: `new`, `update`, or `end` |
+| `topic` | string | Which MQTT topic to use: `reviews` or `events` |
+| `severity` | list | Frigate review severity filter: `alert`, `detection` |
+| `objects` | list | Filter by object label and minimum confidence percent |
+| `zones` | list | Filter by Frigate zone names (empty = all zones) |
+
+## AI Analysis
+
+When the `ai` section is present and `url`/`model` are set, frte2tg will:
+
+1. Send all snapshots to Ollama after posting to Telegram
+2. Edit the Telegram message caption with AI descriptions for each snapshot
+
+Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise.
+
+Tested with `qwen2.5vl:7b` on a machine with RTX 3060 — ~2 seconds per image.
+
+## Web UI
+
+Available at `http://<host>:8888`
+
+- Live log viewer with filtering by type, camera, text
+- Color-coded by event ID
+- Config editor with backup on save
+
+## Building
+
+```bash
+docker build -t rsvln/frte2tg:latest .
+docker push rsvln/frte2tg:latest
+```
+
+## License
+
+MIT
