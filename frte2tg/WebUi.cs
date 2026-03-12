@@ -1,9 +1,4 @@
-﻿using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
-using System.Text;
-
-namespace frte2tg
+﻿namespace frte2tg
 {
     internal static class WebUi
     {

@@ -1,14 +1,5 @@
-using Microsoft.Extensions.Logging;
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using Telegram.Bot;
-using Telegram.Bot.Types;
-using YamlDotNet.Serialization;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Processing;
 
@@ -171,38 +162,6 @@ namespace frte2tg
                 Program.Log("ai", task.EventId, task.Camera, $"Task failed: {ex.Message}");
             }
         }
-
-        //private async Task<string> CallAIApiAsync(string imagePath, string prompt, string eventId, string camera)
-        //{
-        //    try
-        //    {
-        //        using var form = new MultipartFormDataContent();
-        //        var imageBytes = await System.IO.File.ReadAllBytesAsync(imagePath);
-        //        var imageContent = new ByteArrayContent(imageBytes);
-        //        imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
-        //        form.Add(imageContent, "image", Path.GetFileName(imagePath));
-        //        form.Add(new StringContent("ru"), "language");
-        //        form.Add(new StringContent(aiModel), "model");
-        //        form.Add(new StringContent(prompt ?? ""), "prompt");
-
-        //        var response = await httpClient.PostAsync($"{aiApiUrl}/analyze-image-smart", form);
-        //        response.EnsureSuccessStatusCode();
-
-        //        var json = await response.Content.ReadAsStringAsync();
-        //        var aiResponse = System.Text.Json.JsonSerializer.Deserialize<AIResponse>(json);
-
-        //        if (aiResponse == null || string.IsNullOrEmpty(aiResponse.description))
-        //            return null;
-
-        //        //var result = $"{aiResponse.people_count} чел.\n📝 {aiResponse.description}";
-        //        return aiResponse.description;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Program.Log("ai", eventId, camera, $"API call failed: {ex.Message}");
-        //        return null;
-        //    }
-        //}
 
         private async Task<string> CallAIApiAsync(string imagePath, string prompt, string eventId, string camera)
         {
