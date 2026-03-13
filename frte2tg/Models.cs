@@ -1,4 +1,6 @@
-﻿namespace frte2tg
+﻿using Telegram.Bot.Types;
+
+namespace frte2tg
 {
 
     public class Queries
@@ -83,8 +85,10 @@
         public string camera { get; set; }
         public bool snapshot { get; set; } = true;
         public bool clip { get; set; } = false;
+        public bool gif { get; set; } = false;
         public bool trueend { get; set; } = false;
         public bool sctogether { get; set; } = false;
+        public bool ai { get; set; } = false;
         public string topic { get; set; } = "reviews";
         public string snapshottrigger { get; set; } = "end";
         public List<Objects> objects { get; set; } = new List<Objects>();
@@ -135,6 +139,7 @@
         public int timeout { get; set; } = 300;
         public int retry { get; set; } = 10;
         public bool sendeverythingwhatyouhave { get; set; } = true;
+        public int gifwidth { get; set; } = 640;     
     }
 
     public class LoggerSettings
@@ -241,7 +246,29 @@
         public Int64 size { get; set; }
     }
 
+    public class AITask
+    {
+        public List<string> ImagePaths { get; set; }
+        public long ChatId { get; set; }
+        public int MessageId { get; set; }
+        public string Camera { get; set; }
+        public string EventId { get; set; }
+        public DateTime QueuedAt { get; set; }
+        public string OriginalCaption { get; set; }
+        public string Prompt { get; set; }
+    }
 
+    public class AIResponse
+    {
+        public int people_count { get; set; }
+        public string description { get; set; }
+        public string timestamp { get; set; }
+    }
+
+    public class OllamaResponse
+    {
+        public string response { get; set; }
+    }
 
 
 }

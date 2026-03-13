@@ -5,48 +5,20 @@ using SixLabors.ImageSharp.Processing;
 
 namespace frte2tg
 {
-    public class AITask
-    {
-        public List<string> ImagePaths { get; set; }
-        public long ChatId { get; set; }
-        public int MessageId { get; set; }
-        public string Camera { get; set; }
-        public string EventId { get; set; }
-        public DateTime QueuedAt { get; set; }
-        public string OriginalCaption { get; set; }
-        public string Prompt { get; set; }
-    }
-
-
-
-    public class AIResponse
-    {
-        public int people_count { get; set; }
-        public string description { get; set; }
-        public string timestamp { get; set; }
-    }
-
-    public class OllamaResponse
-    {
-        public string response { get; set; }
-    }
-
     public class AIQueueService
     {
-        private readonly ConcurrentQueue<AITask> _queue = new ConcurrentQueue<AITask>();
+        private readonly ConcurrentQueue<AITask> queue = new ConcurrentQueue<AITask>();
         private readonly HttpClient httpClient;
         private readonly ITelegramBotClient tgBotClient;
-        private readonly string aiApiUrl;
         private readonly SemaphoreSlim semaphore;
         private readonly CancellationTokenSource cts;
+        private readonly string aiApiUrl;
         private readonly string aiModel;
-        private readonly string humanPrompt;
-        private readonly string nonHumanPrompt;
         private readonly int numPredict;
         private readonly double temperature;
         private readonly int resizeToWidth;
 
-        private Task _workerTask;
+        private Task workerTask;
 
         public AIQueueService(
             ITelegramBotClient botClient, 
@@ -55,8 +27,6 @@ namespace frte2tg
         {
             aiApiUrl = aiSettings.url;
             aiModel = aiSettings.model;
-            humanPrompt = aiSettings.humanprompt;
-            nonHumanPrompt = aiSettings.nonhumanprompt;
             numPredict = aiSettings.numpredict;
             temperature = aiSettings.temperature;
             resizeToWidth = aiSettings.resizetowidth;
@@ -68,22 +38,22 @@ namespace frte2tg
 
         public void Start()
         {
-            _workerTask = Task.Run(() => ProcessQueueAsync(cts.Token));
+            workerTask = Task.Run(() => ProcessQueueAsync(cts.Token));
             Program.Log("application", "", "", " AI queue service started");
         }
 
         public void Stop()
         {
             cts.Cancel();
-            _workerTask?.Wait();
+            workerTask?.Wait();
             Program.Log("ai", "", "", "Queue service stopped");
         }
 
         public void AddToQueue(AITask task)
         {
             task.QueuedAt = DateTime.Now;
-            _queue.Enqueue(task);
-            Program.Log("ai", task.EventId, task.Camera, $"Added to queue ({_queue.Count} in queue)");
+            queue.Enqueue(task);
+            Program.Log("ai", task.EventId, task.Camera, $"Added to queue ({queue.Count} in queue)");
         }
 
         private async Task ProcessQueueAsync(CancellationToken cancellationToken)
@@ -92,7 +62,7 @@ namespace frte2tg
             {
                 try
                 {
-                    if (_queue.TryDequeue(out var task))
+                    if (queue.TryDequeue(out var task))
                     {
                         await semaphore.WaitAsync(cancellationToken);
                         
@@ -143,7 +113,7 @@ namespace frte2tg
                     }
                     var desc = await CallAIApiAsync(path, task.Prompt, task.EventId, task.Camera);
                     if (!string.IsNullOrEmpty(desc))
-                        descriptions.Add(task.ImagePaths.Count > 1 ? $"📸 {idx}. {desc}" : desc);
+                        descriptions.Add(task.ImagePaths.Count > 1 ? $"{idx}. {desc}" : desc);
                     idx++;
                 }
 
@@ -179,7 +149,6 @@ namespace frte2tg
                         imageBytes = ms.ToArray();
                     }
                 }
-
                 
                 var imageBase64 = Convert.ToBase64String(imageBytes);
 
@@ -241,7 +210,7 @@ namespace frte2tg
 
         public int GetQueueSize()
         {
-            return _queue.Count;
+            return queue.Count;
         }
     }
 }

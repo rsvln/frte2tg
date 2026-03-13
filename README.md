@@ -1,3 +1,5 @@
+Основная задача сервиса - дождаться завершения записи видео по событию на диск и отправить его в телеграм, в том числе разбив его на части, в случае необходимости. Исходники <a href="https://github.com/rsvln/frte2tg">тут</a><br><br>
+
 # frte2tg
 
 Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots and video clips to Telegram. Optionally analyzes snapshots with a local AI model via Ollama.
@@ -104,8 +106,8 @@ ai:
   model: "qwen2.5vl:7b"
   humanprompt: "Кратко опиши что делает человек. Что он держит или несёт? 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
   nonhumanprompt: "Кратко опиши что происходит. 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
-  numpredict: 150
-  temperature: 0.1
+  numpredict: 150              # max tokens in Ollama response, limits description length
+  temperature: 0.1             # lower = more deterministic, higher = more creative
   resizetowidth: 640           # resize image before sending to Ollama, 0 to disable
 ```
 

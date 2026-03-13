@@ -62,37 +62,19 @@ namespace frte2tg
                 return;
             }
 
+            bot = new TelegramBotClient(
+                            new TelegramBotClientOptions(
+                            token: settings.telegram.token,
+                            baseUrl: string.IsNullOrEmpty(settings.telegram.apiserver) ? null : settings.telegram.apiserver)
+                      );
 
-            if (settings.telegram.apiserver != "")
-            {
-                TelegramBotClientOptions tbco = new TelegramBotClientOptions(
-                        token: settings.telegram.token,
-                        baseUrl: settings.telegram.apiserver);
-                bot = new TelegramBotClient(new TelegramBotClientOptions(
-                        token: settings.telegram.token,
-                        baseUrl: settings.telegram.apiserver));
-            }
-            else
-            {
-                TelegramBotClientOptions tbco = new TelegramBotClientOptions(
-                        token: settings.telegram.token);
-                bot = new TelegramBotClient(tbco);
-            }
-
-            ReceiverOptions tgreceiverOptions = new()
-            {
-                AllowedUpdates = Array.Empty<UpdateType>()
-            };
-            var receiverOptions = new ReceiverOptions
-            {
-                AllowedUpdates = { },
-            };
             bot.StartReceiving(
-                updateHandler: TgHandleUpdateAsync,
-                pollingErrorHandler: TgHandlePollingErrorAsync,
-                receiverOptions: tgreceiverOptions,
-                cancellationToken: CancellationToken.None
-            );
+                            updateHandler: TgHandleUpdateAsync,
+                            pollingErrorHandler: TgHandlePollingErrorAsync,
+                            receiverOptions: new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() },
+                            cancellationToken: CancellationToken.None
+                      );
+
             _ = Task.Run(() => bot.GetMeAsync());
 
             Log("application", "", "", "Telegram bot polling started");
@@ -141,15 +123,9 @@ namespace frte2tg
                 Log("application", "", "", "Waiting for mqtt messages");
 
                 var mqttSubscribeOptions = mqttFactory.CreateSubscribeOptionsBuilder()
-                                        .WithTopicFilter(x =>
-                                        {
-                                            x.WithTopic(settings.mqtt.eventstopic);
-                                        })
-                                        .WithTopicFilter(x =>
-                                        {
-                                            x.WithTopic(settings.mqtt.reviewstopic);
-                                        })
-                                        .Build();
+                                            .WithTopicFilter(f => f.WithTopic(settings.mqtt.eventstopic))
+                                            .WithTopicFilter(f => f.WithTopic(settings.mqtt.reviewstopic))
+                                            .Build();
                 await mqttClient.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
 
             }
@@ -223,6 +199,14 @@ namespace frte2tg
             p.WaitForExit();
             System.IO.File.Delete(txtPath);
         }
+        private static string RunFfmpegGif(string mp4Path, int width = 320)
+        {
+            string gifPath = mp4Path.Replace(".mp4", ".gif");
+            string args = $"-y -hide_banner -loglevel error -i \"{mp4Path}\" -r 8 -vf \"setpts=0.12*PTS,scale={width}:-1\" -loop 0 \"{gifPath}\"";
+            using var p = Process.Start("ffmpeg", args);
+            p.WaitForExit();
+            return gifPath;
+        }
 
         async static Task FrigateReviewNewWorker(FrigateReview fr)
         {
@@ -265,7 +249,6 @@ namespace frte2tg
                     }
 
 
-
                     string tgcaption = "Обзор: \t" + fr.after.id + "\n" +
                                        "Камера: " + fr.after.camera + "\n" +
                                        "Объекты: " + string.Join(", ", rulabels) + "\n" +
@@ -302,7 +285,7 @@ namespace frte2tg
                             Log("review", fr.after.id, camera, "The snapshot was sent to telegram chat " + chid.ToString());
 
 
-                        if (goAI)
+                        if (goAI && settings.frigate.cameras[cami].ai)
                         {
 
                             aiQueue.AddToQueue(new AITask
@@ -405,16 +388,197 @@ namespace frte2tg
                     }
                 }
 
-                if (true)
-                {
-                    int secs = 0;
-                    string sqlq = new Queries().getEventQuery(fr.after.id, fr.after.camera, "review", true);
-                    SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
-                    bool isSuccess = false;
+                int secs = 0;
+                string sqlq = new Queries().getEventQuery(fr.after.id, fr.after.camera, "review", true);
+                SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
+                bool isSuccess = false;
 
-                    while (secs <= settings.options.timeout)
+                while (secs <= settings.options.timeout)
+                {
+                    SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
+                    db.Open();
+                    SqliteDataReader dr = (new SqliteCommand(sqlq, db)).ExecuteReader();
+                    if (dr.HasRows)
                     {
+                        isSuccess = true;
+                        Log("review", fr.after.id, camera, "All recordings are ready");
+
+                        if (settings.frigate.cameras[cami].trueend)
+                        {
+                            var fes = new FrigateReview();
+                            fes = fr;
+                            fes.type = "trueend";
+                            Log("review", fr.after.id, camera, "Sending the trueend review");
+                            var message = new MqttApplicationMessageBuilder()
+                                            .WithTopic(settings.mqtt.reviewstopic)
+                                            .WithPayload(JsonConvert.SerializeObject(fes))
+                                            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
+                                            .WithRetainFlag()
+                                            .Build();
+                            await mqttClient.PublishAsync(message, CancellationToken.None);
+                        }
+
+                        if (settings.frigate.cameras[cami].clip)
+                        {
+
+                            List<DbRow> dl = new List<DbRow>();
+                            //double clipduration = 0;
+                            //long clipsize = 0;
+                            while (dr.Read())
+                            {
+                                dl.Add(new DbRow
+                                {
+                                    path = (string)dr["path"],
+                                    start_time = (double)dr["start_time"],
+                                    end_time = (double)dr["end_time"],
+                                    duration = (double)dr["duration"],
+                                    realpath = dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath),
+                                    size = (new FileInfo(dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath))).Length
+                                });
+
+                                //clipsize += dl.Last().size;
+                                //clipduration += (double)dr["duration"];
+                            }
+
+                            db.Close();
+                            Thread.Sleep(10);
+
+                            var parts = BuildFfmpegParts(fr.after.id, camera, dl);
+                            int partid = parts.Count;
+
+                            Thread.Sleep(settings.options.retry * 100);
+
+                            if ((settings.frigate.cameras[cami].sctogether) && (settings.frigate.cameras[cami].snapshot))
+                            {
+                                for (int i = 1; i <= partid; i++)
+                                {
+                                    if (!firstmessage)
+                                    {
+
+                                        InputMediaVideo ivp = new InputMediaVideo(
+                                                                    new InputFileStream(
+                                                                            System.IO.File.OpenRead(
+                                                                            //appLocation + "/" + fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4")
+                                                                            parts[i - 1].path),
+                                                                            fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4")
+                                                                            );
+                                        md.Add(ivp);
+
+                                        if ((md.Count == settings.telegram.mediagrouplimit) || (i == partid))
+                                        {
+                                            int x = 1;
+                                            foreach (var chid in settings.telegram.chatids)
+                                            {
+                                                if (x > 1)
+                                                    Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
+
+                                                Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                                                await Task.Delay(100);
+                                                firstmessages[chid] = msgs[0].MessageId;
+
+                                                Log("review", fr.after.id, camera, "The snapshot and clip were sent to telegram chat " + chid.ToString());
+                                                x++;
+
+                                                if (goAI && settings.frigate.cameras[cami].ai)
+                                                {
+
+                                                    aiQueue.AddToQueue(new AITask
+                                                    {
+                                                        ImagePaths = fr.after.data.detections
+                                                                        .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
+                                                                        .ToList(),
+                                                        Prompt = fr.after.data.objects.Contains("person") ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
+                                                        ChatId = long.Parse(chid),
+                                                        MessageId = firstmessages[chid],
+                                                        Camera = camera,
+                                                        EventId = fr.after.id,
+                                                        OriginalCaption = tgcaption
+                                                    });
+                                                }
+                                            }   
+                                        }
+                                    }
+                                    else
+                                    {
+                                        tgcaption = "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео";
+                                        int x = 1;
+                                        foreach (var chid in settings.telegram.chatids)
+                                        {
+                                            await bot.SendVideoAsync(
+                                                    chatId: chid,
+                                                    video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
+                                                    caption: tgcaption,
+                                                    supportsStreaming: true,
+                                                    parseMode: ParseMode.Markdown,
+                                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                                            Thread.Sleep(100);
+                                            if (x > 1)
+                                                Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
+                                            x++;
+                                            Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
+                                        }
+                                    }
+
+                                    System.IO.File.Delete(parts[i - 1].path);
+                                }
+                            }
+                            else
+                            {
+                                for (int i = 1; i <= partid; i++)
+                                {
+                                    int x = 1;
+                                    foreach (var chid in settings.telegram.chatids)
+                                    {
+                                                tgcaption = (firstmessages[chid] != -1) ?
+                                                            "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео" :
+                                                            "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео\n" +
+                                                            "Камера: " + fr.after.camera + "\n" +
+                                                            "Объекты: " + string.Join(", ", rulabels) + "\n" +
+                                                            "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                                            (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                                            "События: " + string.Join(", ", fr.after.data.detections) + "";
+
+                                        await bot.SendVideoAsync(
+                                                chatId: chid,
+                                                video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
+                                                caption: tgcaption,
+                                                supportsStreaming: true,
+                                                parseMode: ParseMode.Markdown,
+                                                replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+
+                                        Thread.Sleep(100);
+                                        if (x > 1)
+                                            Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
+                                        x++;
+                                        Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
+
+                                }
+
+                                    System.IO.File.Delete(parts[i - 1].path);
+                                }
+                            }
+
+                            break;
+                        }
+                        else
+                        {
+
+                            isSuccess = true;
+                            break;
+                        }
+                    }
+
+                    secs += settings.options.retry;
+                    await Task.Delay(settings.options.retry * 1000);
+                }
+
+                if (!isSuccess)
+                {
+                    if (settings.options.sendeverythingwhatyouhave)
+                    {
+                        Log("review", fr.after.id, camera, "Timeout expired, video files were not ready. Trying to send everything the frigate has");
                         SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
+                        sqlq = new Queries().getEventQuery(fr.after.id, fr.after.camera, "review", false);
                         db.Open();
                         SqliteDataReader dr = (new SqliteCommand(sqlq, db)).ExecuteReader();
                         if (dr.HasRows)
@@ -441,8 +605,6 @@ namespace frte2tg
                             {
 
                                 List<DbRow> dl = new List<DbRow>();
-                                //double clipduration = 0;
-                                //long clipsize = 0;
                                 while (dr.Read())
                                 {
                                     dl.Add(new DbRow
@@ -455,19 +617,13 @@ namespace frte2tg
                                         size = (new FileInfo(dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath))).Length
                                     });
 
-                                    //clipsize += dl.Last().size;
-                                    //clipduration += (double)dr["duration"];
                                 }
 
                                 db.Close();
                                 Thread.Sleep(10);
 
-
                                 var parts = BuildFfmpegParts(fr.after.id, camera, dl);
                                 int partid = parts.Count;
-
-                                Thread.Sleep(settings.options.retry * 100);
-
 
                                 if ((settings.frigate.cameras[cami].sctogether) && (settings.frigate.cameras[cami].snapshot))
                                 {
@@ -475,14 +631,7 @@ namespace frte2tg
                                     {
                                         if (!firstmessage)
                                         {
-
-                                            InputMediaVideo ivp = new InputMediaVideo(
-                                                                        new InputFileStream(
-                                                                               System.IO.File.OpenRead(
-                                                                               //appLocation + "/" + fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4")
-                                                                               parts[i - 1].path),
-                                                                               fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4")
-                                                                               );
+                                            InputMediaVideo ivp = new InputMediaVideo(new InputFileStream(System.IO.File.OpenRead(parts[i - 1].path), fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4"));
                                             md.Add(ivp);
 
                                             if ((md.Count == settings.telegram.mediagrouplimit) || (i == partid))
@@ -490,19 +639,19 @@ namespace frte2tg
                                                 int x = 1;
                                                 foreach (var chid in settings.telegram.chatids)
                                                 {
-                                                    if (x > 1)
-                                                        Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
 
                                                     Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
                                                     await Task.Delay(100);
                                                     firstmessages[chid] = msgs[0].MessageId;
 
-                                                    Log("review", fr.after.id, camera, "The snapshot and clip were sent to telegram chat " + chid.ToString());
+                                                    if (x > 1)
+                                                        Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                                                     x++;
+                                                    Log("review", fr.after.id, camera, "The snapshot and clip was sent to telegram chat " + chid.ToString());
 
-                                                    if (goAI)
+
+                                                    if (goAI && settings.frigate.cameras[cami].ai)
                                                     {
-
                                                         aiQueue.AddToQueue(new AITask
                                                         {
                                                             ImagePaths = fr.after.data.detections
@@ -516,9 +665,8 @@ namespace frte2tg
                                                             OriginalCaption = tgcaption
                                                         });
                                                     }
-
+                                                }
                                             }
-                                        }
                                         }
                                         else
                                         {
@@ -548,17 +696,21 @@ namespace frte2tg
                                 {
                                     for (int i = 1; i <= partid; i++)
                                     {
+
                                         int x = 1;
                                         foreach (var chid in settings.telegram.chatids)
                                         {
-                                                   tgcaption = (firstmessages[chid] != -1) ?
-                                                               "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео" :
-                                                               "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео\n" +
-                                                               "Камера: " + fr.after.camera + "\n" +
-                                                               "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                                                               "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                                               (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                                               "События: " + string.Join(", ", fr.after.data.detections) + "";
+                                                    tgcaption = (firstmessages[chid] != -1) ?
+                                                                "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео" :
+                                                                "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео\n" +
+                                                                "Камера: " + fr.after.camera + "\n" +
+                                                                "Объекты: " + string.Join(", ", rulabels) + "\n" +
+                                                                "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                                                (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                                                "События: " + string.Join(", ", fr.after.data.detections) + "";
+
+                                            if (x > 1)
+                                                Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
 
                                             await bot.SendVideoAsync(
                                                     chatId: chid,
@@ -569,205 +721,26 @@ namespace frte2tg
                                                     replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
 
                                             Thread.Sleep(100);
-                                            if (x > 1)
-                                                Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                            x++;
                                             Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
-
-                                            
-
-                                    }
+                                            x++;
+                                        }
 
                                         System.IO.File.Delete(parts[i - 1].path);
                                     }
                                 }
-
-
-                                break;
-                            }
-                            else
-                            {
-
-                                isSuccess = true;
-                                break;
                             }
                         }
-
-                        secs += settings.options.retry;
-                        await Task.Delay(settings.options.retry * 1000);
                     }
-
-                    if (!isSuccess)
-                    {
-                        if (settings.options.sendeverythingwhatyouhave)
-                        {
-                            Log("review", fr.after.id, camera, "Timeout expired, video files were not ready. Trying to send everything the frigate has");
-                            SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
-                            sqlq = new Queries().getEventQuery(fr.after.id, fr.after.camera, "review", false);
-                            db.Open();
-                            SqliteDataReader dr = (new SqliteCommand(sqlq, db)).ExecuteReader();
-                            if (dr.HasRows)
-                            {
-                                isSuccess = true;
-                                Log("review", fr.after.id, camera, "All recordings are ready");
-
-                                if (settings.frigate.cameras[cami].trueend)
-                                {
-                                    var fes = new FrigateReview();
-                                    fes = fr;
-                                    fes.type = "trueend";
-                                    Log("review", fr.after.id, camera, "Sending the trueend review");
-                                    var message = new MqttApplicationMessageBuilder()
-                                                    .WithTopic(settings.mqtt.reviewstopic)
-                                                    .WithPayload(JsonConvert.SerializeObject(fes))
-                                                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
-                                                    .WithRetainFlag()
-                                                    .Build();
-                                    await mqttClient.PublishAsync(message, CancellationToken.None);
-                                }
-
-                                if (settings.frigate.cameras[cami].clip)
-                                {
-
-                                    List<DbRow> dl = new List<DbRow>();
-                                    while (dr.Read())
-                                    {
-                                        dl.Add(new DbRow
-                                        {
-                                            path = (string)dr["path"],
-                                            start_time = (double)dr["start_time"],
-                                            end_time = (double)dr["end_time"],
-                                            duration = (double)dr["duration"],
-                                            realpath = dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath),
-                                            size = (new FileInfo(dr["path"].ToString().Replace(settings.frigate.recordingsoriginalpath, settings.frigate.recordingspath))).Length
-                                        });
-
-                                    }
-
-                                    db.Close();
-                                    Thread.Sleep(10);
-
-                                    var parts = BuildFfmpegParts(fr.after.id, camera, dl);
-                                    int partid = parts.Count;
-
-                                    if ((settings.frigate.cameras[cami].sctogether) && (settings.frigate.cameras[cami].snapshot))
-                                    {
-                                        for (int i = 1; i <= partid; i++)
-                                        {
-                                            if (!firstmessage)
-                                            {
-                                                InputMediaVideo ivp = new InputMediaVideo(new InputFileStream(System.IO.File.OpenRead(parts[i - 1].path), fr.after.id + ((partid == 1) ? "" : "-part" + i.ToString()) + ".mp4"));
-                                                md.Add(ivp);
-
-                                                if ((md.Count == settings.telegram.mediagrouplimit) || (i == partid))
-                                                {
-                                                    int x = 1;
-                                                    foreach (var chid in settings.telegram.chatids)
-                                                    {
-
-                                                        Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
-                                                        await Task.Delay(100);
-                                                        firstmessages[chid] = msgs[0].MessageId;
-
-                                                        if (x > 1)
-                                                            Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                                        x++;
-                                                        Log("review", fr.after.id, camera, "The snapshot and clip was sent to telegram chat " + chid.ToString());
-
-
-                                                        if (goAI)
-                                                        {
-                                                            aiQueue.AddToQueue(new AITask
-                                                            {
-                                                                ImagePaths = fr.after.data.detections
-                                                                                .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
-                                                                                .ToList(),
-                                                                Prompt = fr.after.data.objects.Contains("person") ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
-                                                                ChatId = long.Parse(chid),
-                                                                MessageId = firstmessages[chid],
-                                                                Camera = camera,
-                                                                EventId = fr.after.id,
-                                                                OriginalCaption = tgcaption
-                                                            });
-                                                        }
-                                                }
-                                                }
-                                            }
-                                            else
-                                            {
-                                                tgcaption = "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео";
-                                                int x = 1;
-                                                foreach (var chid in settings.telegram.chatids)
-                                                {
-                                                    await bot.SendVideoAsync(
-                                                            chatId: chid,
-                                                            video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
-                                                            caption: tgcaption,
-                                                            supportsStreaming: true,
-                                                            parseMode: ParseMode.Markdown,
-                                                            replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
-                                                    Thread.Sleep(100);
-                                                    if (x > 1)
-                                                        Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                                    x++;
-                                                    Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
-                                                }
-                                            }
-
-                                            System.IO.File.Delete(parts[i - 1].path);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        for (int i = 1; i <= partid; i++)
-                                        {
-
-                                            int x = 1;
-                                            foreach (var chid in settings.telegram.chatids)
-                                            {
-                                                       tgcaption = (firstmessages[chid] != -1) ?
-                                                                   "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео" :
-                                                                   "" + fr.after.id + ((partid == 1) ? "" : "[" + i.ToString() + "]") + " видео\n" +
-                                                                   "Камера: " + fr.after.camera + "\n" +
-                                                                   "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                                                                   "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                                                   (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                                                   "События: " + string.Join(", ", fr.after.data.detections) + "";
-
-                                                if (x > 1)
-                                                    Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-
-                                                await bot.SendVideoAsync(
-                                                        chatId: chid,
-                                                        video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
-                                                        caption: tgcaption,
-                                                        supportsStreaming: true,
-                                                        parseMode: ParseMode.Markdown,
-                                                        replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
-
-                                                Thread.Sleep(100);
-                                                Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
-                                                x++;
-                                            }
-
-                                            System.IO.File.Delete(parts[i - 1].path);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else
-                            Log("review", fr.after.id, camera, "Timeout ended, video files were not ready");
-                    }
+                    else
+                        Log("review", fr.after.id, camera, "Timeout ended, video files were not ready");
                 }
+
             }
             catch
             {
                 Log("review", fr.after.id, fr.after.camera, "Error in review end worker");
             }
         }
-
-
         async static Task FrigateEventNewWorker(FrigateEvent fe)
         {
             try
@@ -824,7 +797,7 @@ namespace frte2tg
                         firstmessageid = tgTask.Result.MessageId;
                         tgTask.Dispose();
 
-                        if (goAI)
+                        if (goAI && settings.frigate.cameras[cami].ai)
                         {
 
                             aiQueue.AddToQueue(new AITask
@@ -888,7 +861,6 @@ namespace frte2tg
                                  ParseMode = ParseMode.Markdown
                              };
 
-
                     if (
                         ((md.Count > 0) && !(settings.frigate.cameras[cami].sctogether)) ||
                         ((md.Count > 0) && !(settings.frigate.cameras[cami].clip))
@@ -908,7 +880,7 @@ namespace frte2tg
                             x++;
                             Log("event", fe.after.id, camera, "The snapshot was sent to telegram chat " + chid.ToString());
 
-                            if (goAI)
+                            if (goAI && settings.frigate.cameras[cami].ai)
                             {
 
                                 aiQueue.AddToQueue(new AITask
@@ -922,12 +894,9 @@ namespace frte2tg
                                     OriginalCaption = tgcaption
                                 });
                             }
-
                         }
                     }
                 }
-
-
 
                 if (fe.after.has_clip)
                 {
@@ -1023,7 +992,7 @@ namespace frte2tg
                                                     Log("event", fe.after.id, camera, "The snapshot and clip was sent to telegram chat " + chid.ToString());
                                                     x++;
 
-                                                    if (goAI)
+                                                    if (goAI && settings.frigate.cameras[cami].ai)
                                                     {
 
                                                         aiQueue.AddToQueue(new AITask
@@ -1037,7 +1006,6 @@ namespace frte2tg
                                                             OriginalCaption = tgcaption
                                                         });
                                                     }
-
                                                 }
                                             }
                                         }
@@ -1195,7 +1163,7 @@ namespace frte2tg
                                                         Log("event", fe.after.id, camera, "The snapshot and clip was sent to telegram chat " + chid.ToString());
                                                         x++;
 
-                                                        if (goAI)
+                                                        if (goAI && settings.frigate.cameras[cami].ai)
                                                         {
 
                                                             aiQueue.AddToQueue(new AITask
@@ -1233,7 +1201,7 @@ namespace frte2tg
                                                     Log("event", fe.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i.ToString() + " ") + "was sent to telegram chat " + chid.ToString());
                                                     x++;
 
-                                                    if (goAI)
+                                                    if (goAI && settings.frigate.cameras[cami].ai)
                                                     {
 
                                                         aiQueue.AddToQueue(new AITask
@@ -1528,7 +1496,6 @@ namespace frte2tg
                     db.Open();
                     SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
                     List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
-
 
                     if (dr.HasRows)
                     {
