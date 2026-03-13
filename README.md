@@ -27,11 +27,21 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 
 ## Quick Start
 
+Image is available from both Docker Hub and GitHub Container Registry:
+
+```bash
+# Docker Hub
+docker pull rsvln/frte2tg:latest
+
+# GitHub Container Registry
+docker pull ghcr.io/rsvln/frte2tg:latest
+```
+
 ```yaml
 # docker-compose.yml
 services:
   frte2tg:
-    image: rsvln/frte2tg:latest
+    image: ghcr.io/rsvln/frte2tg:latest  # or rsvln/frte2tg:latest
     restart: unless-stopped
     volumes:
       - /etc/frte2tg:/etc/frte2tg
@@ -156,8 +166,12 @@ Available at `http://<host>:8888`
 
 ## Building
 
+Pushing to `master` branch triggers an automatic build via GitHub Actions and publishes the image to `ghcr.io/rsvln/frte2tg:latest`.
+
+To build manually:
+
 ```bash
-docker build -t rsvln/frte2tg:latest .
+docker build -t rsvln/frte2tg:latest -f frte2tg/Dockerfile .
 docker push rsvln/frte2tg:latest
 ```
 

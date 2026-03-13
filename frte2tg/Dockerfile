@@ -1,12 +1,12 @@
 #See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
 FROM debian:bookworm
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS base
 USER root
 WORKDIR /app
-RUN apt-get update && apt-get upgrade -y && apt-get install -y ffmpeg curl wget
+RUN apt-get update && apt-get upgrade -y && apt-get install -y  --no-install-recommends ffmpeg curl wget && rm -rf /var/lib/apt/lists/*
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["frte2tg/frte2tg.csproj", "frte2tg/"]
