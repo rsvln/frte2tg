@@ -2,7 +2,7 @@
 
 # frte2tg
 
-Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots and video clips to Telegram. Optionally analyzes snapshots with a local AI model via Ollama.
+Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots, video clips and animated previews to Telegram. Optionally analyzes snapshots with a local AI model via Ollama.
 
 ## Features
 
@@ -10,8 +10,9 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - Sends **snapshots** as media groups
 - Concatenates and sends **video clips** via ffmpeg
 - Splits large clips automatically
+- Generates and sends **animated GIF previews** (optional, per camera)
 - Re-publishes event/review to MQTT with type `trueend` when recordings are fully ready (optional, per camera)
-- AI-powered snapshot descriptions via **Ollama** (optional)
+- AI-powered snapshot descriptions via **Ollama** (optional, per camera)
 - Per-camera configuration: objects, zones, severity, triggers, behavior
 - Web UI for log viewing and config editing (port 8888)
 - Runs as a Docker container
@@ -58,6 +59,8 @@ frigate:
     - camera: frontdoor
       snapshot: true
       clip: true
+      gif: false               # send animated GIF preview
+      ai: false                # enable AI snapshot analysis for this camera
       trueend: false
       sctogether: false        # send snapshot and clip separately
       snapshottrigger: new     # new | update | end
@@ -95,6 +98,7 @@ options:
   timeout: 500                 # seconds to wait for recordings to be ready
   retry: 30                    # polling interval in seconds
   sendeverythingwhatyouhave: true  # send partial clips if timeout expires
+  gifwidth: 640                # GIF preview width in pixels (height is proportional)
 
 logger:
   file: true
@@ -113,21 +117,27 @@ ai:
 
 ### Camera options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `snapshot` | bool | Send snapshots |
-| `clip` | bool | Send video clips |
-| `trueend` | bool | Re-publish event/review to the same MQTT topic with `type: trueend` once all recordings are confirmed ready in Frigate DB. Useful for triggering downstream automations only when the clip is complete. |
-| `sctogether` | bool | Send snapshot and clip in one media group |
-| `snapshottrigger` | string | When to send snapshot: `new`, `update`, or `end` |
-| `topic` | string | Which MQTT topic to use: `reviews` or `events` |
-| `severity` | list | Frigate review severity filter: `alert`, `detection` |
-| `objects` | list | Filter by object label and minimum confidence percent |
-| `zones` | list | Filter by Frigate zone names (empty = all zones) |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `snapshot` | bool | `true` | Send snapshots |
+| `clip` | bool | `false` | Send video clips |
+| `gif` | bool | `false` | Send animated GIF preview generated from the clip |
+| `ai` | bool | `false` | Enable AI snapshot analysis for this camera (requires `ai` section) |
+| `trueend` | bool | `false` | Re-publish event/review to the same MQTT topic with `type: trueend` once all recordings are confirmed ready in Frigate DB. Useful for triggering downstream automations only when the clip is complete. |
+| `sctogether` | bool | `false` | Send snapshot and clip in one media group |
+| `snapshottrigger` | string | `end` | When to send snapshot: `new`, `update`, or `end` |
+| `topic` | string | `reviews` | Which MQTT topic to use: `reviews` or `events` |
+| `severity` | list | `[detection, alert]` | Frigate review severity filter |
+| `objects` | list | `[]` | Filter by object label and minimum confidence percent |
+| `zones` | list | `[]` | Filter by Frigate zone names (empty = all zones) |
+
+## GIF Previews
+
+When `gif: true` is set for a camera, frte2tg generates an animated GIF from the recorded clip using ffmpeg (8 fps, 8x speed) and sends it as a separate Telegram animation. Width is controlled globally via `options.gifwidth`.
 
 ## AI Analysis
 
-When the `ai` section is present and `url`/`model` are set, frte2tg will:
+When the `ai` section is present and `url`/`model` are set, enabling `ai: true` on a camera will:
 
 1. Send all snapshots to Ollama after posting to Telegram
 2. Edit the Telegram message caption with AI descriptions for each snapshot
