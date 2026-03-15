@@ -125,6 +125,7 @@ namespace frte2tg
         public long clipsizesplit { get; set; }
         public int mediagrouplimit { get; set; } = 10;
         public int sendchatstimepause { get; set; } = 30;
+        public int retryonratelimit { get; set; } = 30;
         public string apiserver { get; set; } = "https://api.telegram.org/";
     }
     /*

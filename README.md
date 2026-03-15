@@ -101,6 +101,7 @@ telegram:
   clipsizesplit: 2000000000    # split chunk size
   mediagrouplimit: 10
   sendchatstimepause: 30       # seconds between chats when multiple
+  retryonratelimit: 30         # seconds to wait on Telegram 429 rate limit (fallback if Retry-After not provided)
   apiserver: http://192.168.1.10:8081/  # local bot API server, leave empty for cloud
 
 options:

@@ -29,6 +29,7 @@ namespace frte2tg
                                                         { "bird", "птица" }
                                                     };
         public static ITelegramBotClient bot;
+        public static SemaphoreSlim tgSemaphore = new SemaphoreSlim(1, 1);
         public static MqttFactory mqttFactory;
         public static IMqttClient mqttClient;
         public static MqttClientOptions mqttOptions;
@@ -135,6 +136,33 @@ namespace frte2tg
             }
 
             Thread.Sleep(Timeout.Infinite);
+        }
+
+        private static async Task<T> TgCall<T>(Func<Task<T>> call, string type, string eventId, string camera)
+        {
+            await tgSemaphore.WaitAsync();
+            try
+            {
+                while (true)
+                {
+                    try
+                    {
+                        var result = await call();
+                        await Task.Delay(50);
+                        return result;
+                    }
+                    catch (ApiRequestException ex) when (ex.ErrorCode == 429)
+                    {
+                        int wait = (ex.Parameters?.RetryAfter ?? settings.telegram.retryonratelimit) * 1000;
+                        Log(type, eventId, camera, $"Telegram rate limit, waiting {wait / 1000}s");
+                        await Task.Delay(wait);
+                    }
+                }
+            }
+            finally
+            {
+                tgSemaphore.Release();
+            }
         }
 
         private static List<(int partId, int totalParts, string path)> BuildFfmpegParts(string id, string camera, List<DbRow> dl)
@@ -279,7 +307,7 @@ namespace frte2tg
                         foreach (var chid in settings.telegram.chatids)
                         {
 
-                            Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                            Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "review", fr.after.id, camera);
                             await Task.Delay(100);
                             firstmessageid = msgs[0].MessageId;
                             Log("review", fr.after.id, camera, "The snapshot was sent to telegram chat " + chid.ToString());
@@ -346,11 +374,12 @@ namespace frte2tg
                         int x = 1;
                         foreach (var chid in settings.telegram.chatids)
                         {
-                            await bot.SendAnimationAsync(
+                            Message msg = await TgCall(() => bot.SendAnimationAsync(
                                         chatId: chid,
                                         animation: InputFile.FromStream(System.IO.File.OpenRead(gifPath), Path.GetFileName(gifPath)),
                                         caption: tgcaption,
-                                        replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                                        replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null)
+                                    ,"review", fr.after.id, camera);
                             await Task.Delay(100);
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                             x++;
@@ -385,7 +414,7 @@ namespace frte2tg
                                 foreach (var chid in settings.telegram.chatids)
                                 {
                                     if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                    Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                                    Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "review", fr.after.id, camera);
                                     await Task.Delay(100);
                                     firstmessages[chid] = msgs[0].MessageId;
                                     Log("review", fr.after.id, camera, "The snapshot and clip were sent to telegram chat " + chid);
@@ -413,13 +442,14 @@ namespace frte2tg
                             int x = 1;
                             foreach (var chid in settings.telegram.chatids)
                             {
-                                await bot.SendVideoAsync(
+                                Message msg = await TgCall(() => bot.SendVideoAsync(
                                     chatId: chid,
                                     video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
                                     caption: cap,
                                     supportsStreaming: true,
                                     parseMode: ParseMode.Markdown,
-                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null)
+                                    ,"review", fr.after.id, camera);
                                 await Task.Delay(100);
                                 if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                                 x++;
@@ -447,13 +477,14 @@ namespace frte2tg
                                   "События: " + string.Join(", ", fr.after.data.detections);
 
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                            await bot.SendVideoAsync(
-                                chatId: chid,
-                                video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
-                                caption: cap,
-                                supportsStreaming: true,
-                                parseMode: ParseMode.Markdown,
-                                replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                            Message msg = await TgCall(() => bot.SendVideoAsync(
+                                    chatId: chid,
+                                    video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
+                                    caption: cap,
+                                    supportsStreaming: true,
+                                    parseMode: ParseMode.Markdown,
+                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null)
+                                ,"review", fr.after.id, camera);
                             await Task.Delay(100);
                             Log("review", fr.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i + " ") + "was sent to telegram chat " + chid);
                             x++;
@@ -520,7 +551,7 @@ namespace frte2tg
                         int x = 1;
                         foreach (var chid in settings.telegram.chatids)
                         {
-                            Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                            Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "review", fr.after.id, camera);
                             await Task.Delay(100);
                             firstmessages[chid] = msgs[0].MessageId;
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 * md.Count + 1);
@@ -764,11 +795,12 @@ namespace frte2tg
                         int x = 1;
                         foreach (var chid in settings.telegram.chatids)
                         {
-                            await bot.SendAnimationAsync(
+                            Message msg = await TgCall(() => bot.SendAnimationAsync(
                                     chatId: chid,
                                     animation: InputFile.FromStream(System.IO.File.OpenRead(gifPath), Path.GetFileName(gifPath)),
                                     caption: tgcaption,
-                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null)
+                                 ,"event", fe.after.id, camera);
                             await Task.Delay(100);
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                             x++;
@@ -803,7 +835,7 @@ namespace frte2tg
                                 foreach (var chid in settings.telegram.chatids)
                                 {
                                     if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                    Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                                    Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "event", fe.after.id, camera);
                                     await Task.Delay(100);
                                     firstmessages[chid] = msgs[0].MessageId;
                                     Log("event", fe.after.id, camera, "The snapshot and clip was sent to telegram chat " + chid);
@@ -830,13 +862,14 @@ namespace frte2tg
                             foreach (var chid in settings.telegram.chatids)
                             {
                                 if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
-                                await bot.SendVideoAsync(
+                                Message msg = await TgCall(() => bot.SendVideoAsync(
                                     chatId: chid,
                                     video: InputFile.FromStream(System.IO.File.OpenRead(parts[i - 1].path)),
                                     caption: cap,
                                     supportsStreaming: true,
                                     parseMode: ParseMode.Markdown,
-                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null);
+                                    replyToMessageId: (firstmessages[chid] != -1) ? firstmessages[chid] : null)
+                                ,"event", fe.after.id, camera);
                                 await Task.Delay(100);
                                 Log("event", fe.after.id, camera, "The clip " + ((partid == 1) ? "" : "#" + i + " ") + "was sent to telegram chat " + chid);
                                 x++;
@@ -926,7 +959,7 @@ namespace frte2tg
                         int x = 1;
                         foreach (var chid in settings.telegram.chatids)
                         {
-                            Message[] msgs = await bot.SendMediaGroupAsync(chatId: chid, media: md);
+                            Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "event", fe.after.id, camera);
                             await Task.Delay(100);
                             firstmessages[chid] = msgs[0].MessageId;
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 * md.Count + 1);
@@ -1257,70 +1290,86 @@ namespace frte2tg
                 return;
             }
 
-            async static Task TgHandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        async static Task TgHandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        {
+            if (update.Message is not { } message)
+                return;
+            if (message.Text is not { } messageText)
+                return;
+
+            Log("tg", "", message.Chat.Id.ToString(), "Received message: " + messageText);
+
+            if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
             {
-
-                if (update.Message is not { } message)
-                    return;
-                if (message.Text is not { } messageText)
-                    return;
-
-                if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
-                {
-                    await botClient.SendTextMessageAsync(chatId: message.Chat.Id, text: "go away!", cancellationToken: cancellationToken);
-                    return;
-                }
-
-                if (messageText.ToLower().Contains("/private"))
-                {
-
-                }
-
-                if (messageText.ToLower().Contains("/status"))
-                {
-                    SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
-                    db.Open();
-                    SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
-                    List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
-
-                    if (dr.HasRows)
-                    {
-                        int i = 1;
-
-                        while (dr.Read())
-                        {
-                            string rnd = RandomString(10);
-                            await Task.WhenAll(DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg",
-                                                                 appLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg")
-                                              );
-                            InputMediaPhoto imp =
-                                 new InputMediaPhoto(new InputFileStream(System.IO.File.OpenRead(appLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg"), dr["camera"].ToString() + "_" + rnd + ".jpg"))
-                                 {
-                                     Caption = ((i == 1) || (i % 11 == 0)) ? "Текущая обстановка" : null
-                                 };
-
-                            md.Add(imp);
-                            if (i % 10 == 0)
-                            {
-                                await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md));
-                                md.Clear();
-                            }
-                            System.IO.File.Delete(appLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg");
-                            i++;
-
-                        }
-                    }
-                    dr.Close();
-                    db.Close();
-                    if (md.Count > 0)
-                        await Task.WhenAll(botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md));
-
-                }
-
+                Log("tg", "", message.Chat.Id.ToString(), "Unauthorized access attempt");
+                await TgCall(() => botClient.SendTextMessageAsync(chatId: message.Chat.Id, text: "go away!", cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
                 return;
             }
 
-            static Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+            if (messageText.ToLower().Contains("/private") || messageText.ToLower().Contains("/help"))
+            {
+                Log("tg", "", message.Chat.Id.ToString(), "Sending help");
+                string helpText =
+                    "*frte2tg* — Frigate NVR → Telegram bridge\n\n" +
+                    "Подписывается на MQTT события Frigate и отправляет снапшоты, видеоклипы и GIF-превью в Telegram\\.\n\n" +
+                    "*Команды:*\n" +
+                    "/status — текущая обстановка с камер\n" +
+                    "/help — эта справка\n\n" +
+                    "*Проект:* [github\\.com/rsvln/frte2tg](https://github.com/rsvln/frte2tg)\n\n" +
+                    "*Лицензия:* MIT";
+                await TgCall(() => botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: helpText,
+                    parseMode: ParseMode.MarkdownV2,
+                    cancellationToken: cancellationToken),
+                    "tg", "", message.Chat.Id.ToString());
+            }
+
+            if (messageText.ToLower().Contains("/status"))
+            {
+                Log("tg", "", message.Chat.Id.ToString(), "Sending status");
+                SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
+                db.Open();
+                SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
+                List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
+                if (dr.HasRows)
+                {
+                    int i = 1;
+                    while (dr.Read())
+                    {
+                        string rnd = RandomString(10);
+                        string localPath = appLocation + "/" + dr["camera"].ToString() + "_" + rnd + ".jpg";
+                        await DownloadFileAsync("http://" + settings.frigate.host + ":" + settings.frigate.port.ToString() + "/api/" + dr["camera"].ToString() + "/latest.jpg", localPath);
+
+                        md.Add(new InputMediaPhoto(
+                            new InputFileStream(System.IO.File.OpenRead(localPath), dr["camera"].ToString() + "_" + rnd + ".jpg"))
+                        {
+                            Caption = ((i == 1) || (i % 11 == 0)) ? "Текущая обстановка" : null
+                        });
+
+                        if (i % 10 == 0)
+                        {
+                            await TgCall(() => botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md.ToList()), "tg", "", message.Chat.Id.ToString());
+                            md.Clear();
+                            Log("tg", "", message.Chat.Id.ToString(), "Status batch sent");
+                        }
+
+                        System.IO.File.Delete(localPath);
+                        i++;
+                    }
+                }
+                dr.Close();
+                db.Close();
+
+                if (md.Count > 0)
+                {
+                    await TgCall(() => botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md.ToList()), "tg", "", message.Chat.Id.ToString());
+                    Log("tg", "", message.Chat.Id.ToString(), "Status sent");
+                }
+            }
+        }
+
+        static Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
             {
                 var ErrorMessage = exception switch
                 {
