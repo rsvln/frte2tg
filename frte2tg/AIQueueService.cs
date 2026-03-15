@@ -39,7 +39,7 @@ namespace frte2tg
         public void Start()
         {
             workerTask = Task.Run(() => ProcessQueueAsync(cts.Token));
-            Program.Log("application", "", "", " AI queue service started");
+            Program.Log("app", "", "", "AI queue service started");
         }
 
         public void Stop()

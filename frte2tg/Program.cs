@@ -59,7 +59,7 @@ namespace frte2tg
             }
             catch
             {
-                ConsoleLog("application", "", "", "Bad settings file. Exit");
+                ConsoleLog("app", "", "", "Bad settings file. Exit");
                 return;
             }
 
@@ -78,7 +78,7 @@ namespace frte2tg
 
             _ = Task.Run(() => bot.GetMeAsync());
 
-            Log("application", "", "", "Telegram bot polling started");
+            Log("app", "", "", "Telegram bot polling started");
 
             WebUi.Start(fs);
 
@@ -92,7 +92,7 @@ namespace frte2tg
             }
             else
             {
-                Log("application", "", "", "AI service not configured, skipping");
+                Log("app", "", "", "AI service not configured, skipping");
             }
 
 
@@ -118,10 +118,10 @@ namespace frte2tg
                 }
                 catch (Exception exception)
                 {
-                    Log("application", "", "", "Connecting to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString() + " failed" + exception);
+                    Log("app", "", "", "Connecting to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString() + " failed" + exception);
                 }
 
-                Log("application", "", "", "Waiting for mqtt messages");
+                Log("app", "", "", "Waiting for mqtt messages");
 
                 var mqttSubscribeOptions = mqttFactory.CreateSubscribeOptionsBuilder()
                                             .WithTopicFilter(f => f.WithTopic(settings.mqtt.eventstopic))
@@ -132,7 +132,7 @@ namespace frte2tg
             }
             catch (Exception exception)
             {
-                ConsoleLog("application", "", "", exception.ToString());
+                ConsoleLog("app", "", "", exception.ToString());
             }
 
             Thread.Sleep(Timeout.Infinite);
@@ -1113,7 +1113,7 @@ namespace frte2tg
                     }
                     catch
                     {
-                        Log("application", "", "", "Bad payload");
+                        Log("app", "", "", "Bad payload");
                     }
 
                     int cami = settings.frigate.cameras.FindIndex(m => m.camera == fe.after.camera);
@@ -1180,7 +1180,7 @@ namespace frte2tg
                     }
                     catch
                     {
-                        Log("application", "", "", "Bad payload");
+                        Log("app", "", "", "Bad payload");
                         return;
                     }
 
@@ -1243,7 +1243,7 @@ namespace frte2tg
 
             async static Task MqttClientConnectedAsync(MqttClientConnectedEventArgs arg)
             {
-                Log("application", "", "", "Connected to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString());
+                Log("app", "", "", "Connected to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString());
                 var mqttSubscribeOptions = mqttFactory.CreateSubscribeOptionsBuilder()
                                             .WithTopicFilter(x =>
                                                 {
@@ -1255,13 +1255,13 @@ namespace frte2tg
                                                 })
                                             .Build();
                 await mqttClient.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
-                Log("application", "", "", "Subscribed to topics " + settings.mqtt.eventstopic + ", " + settings.mqtt.reviewstopic);
+                Log("app", "", "", "Subscribed to topics " + settings.mqtt.eventstopic + ", " + settings.mqtt.reviewstopic);
                 return;
             }
 
             async static Task MqttClientDisconnectedAsync(MqttClientDisconnectedEventArgs arg)
             {
-                Log("application", "", "", "Disconnected from mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString());
+                Log("app", "", "", "Disconnected from mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString());
                 await Task.Delay(TimeSpan.FromSeconds(5));
 
                 try
@@ -1270,7 +1270,7 @@ namespace frte2tg
                 }
                 catch
                 {
-                    Log("application", "", "", "Reconnecting to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString() + " failed");
+                    Log("app", "", "", "Reconnecting to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString() + " failed");
                 }
 
                 return;
@@ -1285,7 +1285,7 @@ namespace frte2tg
                 }
                 catch (Exception)
                 {
-                    Log("application", "", "", "Failed to download File: " + url);
+                    Log("app", "", "", "Failed to download File: " + url);
                 }
                 return;
             }
@@ -1301,7 +1301,7 @@ namespace frte2tg
 
             if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
             {
-                Log("tg", "", message.Chat.Id.ToString(), "Unauthorized access attempt");
+                Log("tg", "", message.Chat.Id.ToString(), "Unauthorized access attempt from " + message.Chat.Id + (string.IsNullOrEmpty(message.Chat.Username) ? "" : " (@" + message.Chat.Username + ")"));
                 await TgCall(() => botClient.SendTextMessageAsync(chatId: message.Chat.Id, text: "go away!", cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
                 return;
             }
@@ -1315,12 +1315,12 @@ namespace frte2tg
                     "*Команды:*\n" +
                     "/status — текущая обстановка с камер\n" +
                     "/help — эта справка\n\n" +
-                    "*Проект:* [github\\.com/rsvln/frte2tg](https://github.com/rsvln/frte2tg)\n\n" +
+                    "*Проект:* [github.com/rsvln/frte2tg](https://github.com/rsvln/frte2tg)\n\n" +
                     "*Лицензия:* MIT";
                 await TgCall(() => botClient.SendTextMessageAsync(
                     chatId: message.Chat.Id,
                     text: helpText,
-                    parseMode: ParseMode.MarkdownV2,
+                    parseMode: ParseMode.Markdown,
                     cancellationToken: cancellationToken),
                     "tg", "", message.Chat.Id.ToString());
             }
@@ -1378,7 +1378,7 @@ namespace frte2tg
                     _ => exception.ToString()
                 };
 
-                Log("application", "", "", ErrorMessage);
+                Log("app", "", "", ErrorMessage);
                 return Task.CompletedTask;
             }
 

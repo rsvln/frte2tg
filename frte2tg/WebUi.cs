@@ -148,7 +148,6 @@
               }
 
               .panels { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-
               .panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
               .panel.active { display: flex; }
 
@@ -218,7 +217,8 @@
 
               .log-ts    { color: var(--muted); }
               .log-type  { }
-              .log-type.application { color: var(--accent); }
+              .log-type.app { color: var(--accent); }
+              .log-type.tg { color: var(--accent); }
               .log-type.review { color: var(--green); }
               .log-type.event { color: var(--orange); }
               .log-id    { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -292,7 +292,9 @@
                       <option value="">All</option>
                       <option value="review">review</option>
                       <option value="event">event</option>
-                      <option value="application">application</option>
+                      <option value="app">app</option>
+                      <option value="ai">ai</option>
+                      <option value="tg">tg</option>
                     </select>
 
                     <label>Camera:</label>
