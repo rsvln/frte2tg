@@ -1297,18 +1297,18 @@ namespace frte2tg
             if (message.Text is not { } messageText)
                 return;
 
-            Log("tg", "", message.Chat.Id.ToString(), "Received message: " + messageText);
+            Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Received message: " + messageText);
 
             if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
             {
-                Log("tg", "", message.Chat.Id.ToString(), "Unauthorized access attempt from " + message.Chat.Id + (string.IsNullOrEmpty(message.Chat.Username) ? "" : " (@" + message.Chat.Username + ")"));
+                Log("tg", "", message.From.Id.ToString(), "Unauthorized access attempt from " + message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"));
                 await TgCall(() => botClient.SendTextMessageAsync(chatId: message.Chat.Id, text: "go away!", cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
                 return;
             }
 
             if (messageText.ToLower().Contains("/private") || messageText.ToLower().Contains("/help"))
             {
-                Log("tg", "", message.Chat.Id.ToString(), "Sending help");
+                Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending help");
                 string helpText =
                     "*frte2tg* — Frigate NVR → Telegram bridge\n\n" +
                     "Подписывается на MQTT события Frigate и отправляет снапшоты, видеоклипы и GIF-превью в Telegram\\.\n\n" +
@@ -1327,7 +1327,7 @@ namespace frte2tg
 
             if (messageText.ToLower().Contains("/status"))
             {
-                Log("tg", "", message.Chat.Id.ToString(), "Sending status");
+                Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending status");
                 SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
                 db.Open();
                 SqliteDataReader dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
@@ -1351,7 +1351,7 @@ namespace frte2tg
                         {
                             await TgCall(() => botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md.ToList()), "tg", "", message.Chat.Id.ToString());
                             md.Clear();
-                            Log("tg", "", message.Chat.Id.ToString(), "Status batch sent");
+                            Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Status batch sent");
                         }
 
                         System.IO.File.Delete(localPath);
@@ -1364,7 +1364,7 @@ namespace frte2tg
                 if (md.Count > 0)
                 {
                     await TgCall(() => botClient.SendMediaGroupAsync(chatId: message.Chat.Id, media: md.ToList()), "tg", "", message.Chat.Id.ToString());
-                    Log("tg", "", message.Chat.Id.ToString(), "Status sent");
+                    Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Status sent");
                 }
             }
         }
