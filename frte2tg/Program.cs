@@ -526,7 +526,6 @@ namespace frte2tg
             }
         }
 
-
         async static Task FrigateReviewEndWorker(FrigateReview fr)
         {
             try
@@ -550,6 +549,20 @@ namespace frte2tg
 
                 if (settings.frigate.cameras[cami].snapshot && settings.frigate.cameras[cami].snapshottrigger == "end")
                 {
+                    int secs = 0;
+                    bool allfilesready = false;
+                    while (secs <= settings.options.timeout)
+                    {
+                        allfilesready = fr.after.data.detections
+                            .All(ev => System.IO.File.Exists(settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg"));
+                        if (allfilesready) break;
+                        secs += settings.options.retry;
+                        await Task.Delay(settings.options.retry * 1000);
+                    }
+
+                    if (!allfilesready)
+                        Log("review", fr.after.id, camera, "Some snapshots not ready after timeout, will skip missing");
+
                     tgcaption = "Обзор: \t" + fr.after.id + "\n" +
                                 "Камера: " + fr.after.camera + "\n" +
                                 "Объекты: " + string.Join(", ", rulabels) + "\n" +
@@ -560,8 +573,14 @@ namespace frte2tg
                     int i = 1;
                     foreach (var ev in fr.after.data.detections)
                     {
+                        string snapPath = settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg";
+                        if (!System.IO.File.Exists(snapPath))
+                        {
+                            Log("review", fr.after.id, camera, "Snapshot not found, skipping: " + ev);
+                            continue;
+                        }
                         md.Add(new InputMediaPhoto(
-                            new InputFileStream(System.IO.File.OpenRead(settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg"), fr.after.camera + "-" + ev + ".jpg"))
+                            new InputFileStream(System.IO.File.OpenRead(snapPath), fr.after.camera + "-" + ev + ".jpg"))
                         {
                             Caption = (i == 1) ? tgcaption : null,
                             ParseMode = ParseMode.Markdown
@@ -584,12 +603,28 @@ namespace frte2tg
                             Log("review", fr.after.id, camera, "The snapshot was sent to telegram chat " + chid);
                         }
 
-                        if (goAI && settings.frigate.cameras[cami].ai)
+                        if (goFR && settings.frigate.cameras[cami].fr)
+                            foreach (var chid in settings.telegram.chatids)
+                                frQueue.AddToQueue(new FRTask
+                                {
+                                    ImagePaths = fr.after.data.detections
+                                        .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
+                                        .Where(p => System.IO.File.Exists(p))
+                                        .ToList(),
+                                    AIPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt,
+                                    ChatId = long.Parse(chid),
+                                    MessageId = firstmessages[chid],
+                                    Camera = camera,
+                                    EventId = fr.after.id,
+                                    OriginalCaption = tgcaption
+                                });
+                        else if (goAI && settings.frigate.cameras[cami].ai)
                             foreach (var chid in settings.telegram.chatids)
                                 aiQueue.AddToQueue(new AITask
                                 {
                                     ImagePaths = fr.after.data.detections
                                         .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
+                                        .Where(p => System.IO.File.Exists(p))
                                         .ToList(),
                                     Prompt = fr.after.data.objects.Contains("person") ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
                                     ChatId = long.Parse(chid),
@@ -706,6 +741,7 @@ namespace frte2tg
                 Log("review", fr.after.id, fr.after.camera, "Error in review end worker: " + ex.Message);
             }
         }
+
 
         async static Task FrigateEventNewWorker(FrigateEvent fe)
         {
@@ -989,45 +1025,72 @@ namespace frte2tg
 
                 if (settings.frigate.cameras[cami].snapshot && settings.frigate.cameras[cami].snapshottrigger == "end")
                 {
-                    tgcaption = "Обзор: \t" + fe.after.id + "\n" +
-                                "Камера: " + fe.after.camera + "\n" +
-                                "Объект: " + rulabel + "\n" +
-                                "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                    string snapPath = settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg";
 
-                    md.Add(new InputMediaPhoto(
-                        new InputFileStream(System.IO.File.OpenRead(settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg"), fe.after.camera + "-" + fe.after.id + ".jpg"))
+                    int secs = 0;
+                    while (secs <= settings.options.timeout)
                     {
-                        Caption = tgcaption,
-                        ParseMode = ParseMode.Markdown
-                    });
+                        if (System.IO.File.Exists(snapPath)) break;
+                        secs += settings.options.retry;
+                        await Task.Delay(settings.options.retry * 1000);
+                    }
 
-                    if ((md.Count > 0) && (!settings.frigate.cameras[cami].sctogether || !settings.frigate.cameras[cami].clip))
+                    if (!System.IO.File.Exists(snapPath))
+                        Log("event", fe.after.id, camera, "Snapshot not ready after timeout, skipping");
+                    else
                     {
-                        firstmessage = true;
-                        int x = 1;
-                        foreach (var chid in settings.telegram.chatids)
+                        tgcaption = "Обзор: \t" + fe.after.id + "\n" +
+                                    "Камера: " + fe.after.camera + "\n" +
+                                    "Объект: " + rulabel + "\n" +
+                                    "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                    (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+
+                        md.Add(new InputMediaPhoto(
+                            new InputFileStream(System.IO.File.OpenRead(snapPath), fe.after.camera + "-" + fe.after.id + ".jpg"))
                         {
-                            Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "event", fe.after.id, camera);
-                            await Task.Delay(100);
-                            firstmessages[chid] = msgs[0].MessageId;
-                            if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 * md.Count + 1);
-                            x++;
-                            Log("event", fe.after.id, camera, "The snapshot was sent to telegram chat " + chid);
-                        }
+                            Caption = tgcaption,
+                            ParseMode = ParseMode.Markdown
+                        });
 
-                        if (goAI && settings.frigate.cameras[cami].ai)
+                        if ((md.Count > 0) && (!settings.frigate.cameras[cami].sctogether || !settings.frigate.cameras[cami].clip))
+                        {
+                            firstmessage = true;
+                            int x = 1;
                             foreach (var chid in settings.telegram.chatids)
-                                aiQueue.AddToQueue(new AITask
-                                {
-                                    ImagePaths = new List<string> { settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg" },
-                                    Prompt = fe.after.label == "person" ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
-                                    ChatId = long.Parse(chid),
-                                    MessageId = firstmessages[chid],
-                                    Camera = camera,
-                                    EventId = fe.after.id,
-                                    OriginalCaption = tgcaption
-                                });
+                            {
+                                Message[] msgs = await TgCall(() => bot.SendMediaGroupAsync(chatId: chid, media: md), "event", fe.after.id, camera);
+                                await Task.Delay(100);
+                                firstmessages[chid] = msgs[0].MessageId;
+                                if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 * md.Count + 1);
+                                x++;
+                                Log("event", fe.after.id, camera, "The snapshot was sent to telegram chat " + chid);
+                            }
+
+                            if (goFR && settings.frigate.cameras[cami].fr)
+                                foreach (var chid in settings.telegram.chatids)
+                                    frQueue.AddToQueue(new FRTask
+                                    {
+                                        ImagePaths = new List<string> { snapPath },
+                                        AIPrompt = fe.after.label == "person" ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt,
+                                        ChatId = long.Parse(chid),
+                                        MessageId = firstmessages[chid],
+                                        Camera = camera,
+                                        EventId = fe.after.id,
+                                        OriginalCaption = tgcaption
+                                    });
+                            else if (goAI && settings.frigate.cameras[cami].ai)
+                                foreach (var chid in settings.telegram.chatids)
+                                    aiQueue.AddToQueue(new AITask
+                                    {
+                                        ImagePaths = new List<string> { snapPath },
+                                        Prompt = fe.after.label == "person" ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
+                                        ChatId = long.Parse(chid),
+                                        MessageId = firstmessages[chid],
+                                        Camera = camera,
+                                        EventId = fe.after.id,
+                                        OriginalCaption = tgcaption
+                                    });
+                        }
                     }
                 }
 
