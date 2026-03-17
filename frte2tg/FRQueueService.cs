@@ -170,7 +170,7 @@ namespace frte2tg
 
                 if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
                 {
-                    Program.Log("fr", eventId, camera, "No face found in image");
+                    //Program.Log("fr", eventId, camera, "No face found in image");
                     return result;
                 }
 
