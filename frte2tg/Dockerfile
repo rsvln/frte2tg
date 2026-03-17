@@ -1,9 +1,14 @@
 #See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+#FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+#USER root
+#WORKDIR /app
+#RUN apt-get update && apt-get upgrade -y && apt-get install -y  --no-install-recommends ffmpeg curl wget && rm -rf /var/lib/apt/lists/*
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS base
 USER root
 WORKDIR /app
-RUN apt-get update && apt-get upgrade -y && apt-get install -y  --no-install-recommends ffmpeg curl wget && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ffmpeg curl wget
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
