@@ -16,14 +16,24 @@
                 app.MapGet("/api/log", (int? lines) =>
                 {
                     int n = lines ?? 200;
-                    string logPath = "/var/log/frte2tg/frte2tg_"
-                                   + DateTime.Now.AddMinutes(Program.settings.options.timeoffset)
-                                              .ToString("yyyy-MM-dd") + ".log";
-                    if (!File.Exists(logPath))
+                    string logDir = "/var/log/frte2tg/";
+
+                    var logFiles = Directory.GetFiles(logDir, "frte2tg_*.log")
+                                            .OrderByDescending(f => f)
+                                            .ToArray();
+
+                    if (logFiles.Length == 0)
                         return Results.Ok(new { lines = Array.Empty<string>() });
 
-                    var all = File.ReadAllLines(logPath);
-                    var tail = all.Skip(Math.Max(0, all.Length - n)).ToArray();
+                    var result = new List<string>();
+                    foreach (var file in logFiles)
+                    {
+                        if (result.Count >= n) break;
+                        var fileLines = File.ReadAllLines(file);
+                        result.InsertRange(0, fileLines);
+                    }
+
+                    var tail = result.Skip(Math.Max(0, result.Count - n)).ToArray();
                     return Results.Ok(new { lines = tail });
                 });
 
