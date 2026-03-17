@@ -71,6 +71,7 @@ namespace frte2tg
         public Options options { get; set; }
         public LoggerSettings logger { get; set; }
         public AISettings ai { get; set; }
+        public FRSettings fr { get; set; }
     }
 
     public class Objects
@@ -89,6 +90,7 @@ namespace frte2tg
         public bool trueend { get; set; } = false;
         public bool sctogether { get; set; } = false;
         public bool ai { get; set; } = false;
+        public bool fr { get; set; } = false;
         public string topic { get; set; } = "reviews";
         public string snapshottrigger { get; set; } = "end";
         public List<Objects> objects { get; set; } = new List<Objects>();
@@ -158,6 +160,14 @@ namespace frte2tg
         public int numpredict { get; set; } = 150;
         public double temperature { get; set; } = 0.1;
         public int resizetowidth { get; set; } = 640;
+    }
+
+    public class FRSettings
+    {
+        public string url { get; set; }
+        public string apikey { get; set; }
+        public double confidence { get; set; } = 0.8;
+        public double detprobthreshold { get; set; } = 0.8;
     }
 
     public class BeforeAfterFE

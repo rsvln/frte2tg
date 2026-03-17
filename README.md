@@ -2,7 +2,7 @@
 
 # frte2tg
 
-Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots, video clips and animated previews to Telegram. Optionally analyzes snapshots with a local AI model via Ollama.
+Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, sends snapshots, video clips and animated previews to Telegram. Optionally analyzes snapshots with a local AI model via Ollama and performs face recognition via CompreFace.
 
 ## Features
 
@@ -12,7 +12,9 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - Splits large clips automatically
 - Generates and sends **animated GIF previews** (optional, per camera)
 - Re-publishes event/review to MQTT with type `trueend` when recordings are fully ready (optional, per camera)
-- AI-powered snapshot descriptions via **Ollama** (optional, per camera)
+- **Face recognition** via CompreFace — identifies known people in snapshots (optional, per camera)
+- **AI-powered snapshot descriptions** via Ollama (optional, per camera) — if both FR and AI are enabled, recognized names are passed to Ollama as context
+- Telegram rate limit handling with automatic retry
 - Per-camera configuration: objects, zones, severity, triggers, behavior
 - Web UI for log viewing and config editing (port 8888)
 - Runs as a Docker container
@@ -24,6 +26,7 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - Telegram bot token + local Bot API server (optional but recommended for large files)
 - ffmpeg available in container
 - Ollama instance with a vision model (optional, for AI descriptions)
+- [CompreFace](https://github.com/exadel-inc/CompreFace) instance (optional, for face recognition)
 
 ## Quick Start
 
@@ -71,6 +74,7 @@ frigate:
       clip: true
       gif: false               # send animated GIF preview
       ai: false                # enable AI snapshot analysis for this camera
+      fr: false                # enable face recognition for this camera
       trueend: false
       sctogether: false        # send snapshot and clip separately
       snapshottrigger: new     # new | update | end
@@ -124,6 +128,13 @@ ai:
   numpredict: 150              # max tokens in Ollama response, limits description length
   temperature: 0.1             # lower = more deterministic, higher = more creative
   resizetowidth: 640           # resize image before sending to Ollama, 0 to disable
+
+# Optional: face recognition via CompreFace
+fr:
+  url: http://192.168.1.20:8000
+  apikey: YOUR_COMPREFACE_API_KEY
+  confidence: 0.8              # minimum similarity to consider a match (0.0 - 1.0)
+  detprobthreshold: 0.8        # minimum probability that detected area is actually a face (0.0 - 1.0)
 ```
 
 ### Camera options
@@ -134,6 +145,7 @@ ai:
 | `clip` | bool | `false` | Send video clips |
 | `gif` | bool | `false` | Send animated GIF preview generated from the clip |
 | `ai` | bool | `false` | Enable AI snapshot analysis for this camera (requires `ai` section) |
+| `fr` | bool | `false` | Enable face recognition for this camera (requires `fr` section) |
 | `trueend` | bool | `false` | Re-publish event/review to the same MQTT topic with `type: trueend` once all recordings are confirmed ready in Frigate DB. Useful for triggering downstream automations only when the clip is complete. |
 | `sctogether` | bool | `false` | Send snapshot and clip in one media group |
 | `snapshottrigger` | string | `end` | When to send snapshot: `new`, `update`, or `end` |
@@ -146,6 +158,14 @@ ai:
 
 When `gif: true` is set for a camera, frte2tg generates an animated GIF from the recorded clip using ffmpeg (8 fps, 8x speed) and sends it as a separate Telegram animation. Width is controlled globally via `options.gifwidth`.
 
+## Face Recognition
+
+When the `fr` section is present and `url`/`apikey` are set, enabling `fr: true` on a camera will run face recognition on snapshots via [CompreFace](https://github.com/exadel-inc/CompreFace) before posting results to Telegram.
+
+If `ai: true` is also enabled on the camera, recognized names are automatically passed to Ollama as context, enriching the description prompt. If only `fr` is enabled without `ai`, the caption is updated with recognized names directly.
+
+To set up CompreFace, use the provided `docker-compose-compreface.yml`, then open the web UI, create an application, add a Recognition Service, and upload face photos for each person via the Train section.
+
 ## AI Analysis
 
 When the `ai` section is present and `url`/`model` are set, enabling `ai: true` on a camera will:
@@ -153,7 +173,7 @@ When the `ai` section is present and `url`/`model` are set, enabling `ai: true` 
 1. Send all snapshots to Ollama after posting to Telegram
 2. Edit the Telegram message caption with AI descriptions for each snapshot
 
-Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise.
+Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
 
 Tested with `qwen2.5vl:7b` on a machine with RTX 3060 — ~2 seconds per image.
 
