@@ -199,7 +199,7 @@ namespace frte2tg
         {
             try
             {
-                await tgBotClient.EditMessageCaptionAsync(
+                await tgBotClient.EditMessageCaption(
                     chatId: task.ChatId,
                     messageId: task.MessageId,
                     caption: task.OriginalCaption + "\n\n" + text);

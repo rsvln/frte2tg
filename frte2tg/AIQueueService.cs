@@ -194,7 +194,7 @@ namespace frte2tg
             {
                 var caption = task.OriginalCaption + "\n\n" + description;
 
-                await tgBotClient.EditMessageCaptionAsync(
+                await tgBotClient.EditMessageCaption(
                     chatId: task.ChatId,
                     messageId: task.MessageId,
                     caption: caption
