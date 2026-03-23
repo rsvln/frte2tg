@@ -1,4 +1,7 @@
-﻿namespace frte2tg
+﻿using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
+
+namespace frte2tg
 {
     internal static class WebUi
     {
@@ -51,11 +54,24 @@
                     var data = System.Text.Json.JsonSerializer.Deserialize<ConfigPayload>(body);
                     if (data?.content == null)
                         return Results.BadRequest();
-
                     if (File.Exists(configPath))
                         File.Copy(configPath, configPath + ".bak", overwrite: true);
-
                     File.WriteAllText(configPath, data.content);
+
+                    try
+                    {
+                        Program.settings = (new DeserializerBuilder()
+                            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+                            .Build())
+                            .Deserialize<SettingsFile>(File.ReadAllText(configPath));
+                        await Program.Initialize();
+                        Program.Log("app", "", "", "Settings reloaded");
+                    }
+                    catch (Exception ex)
+                    {
+                        Program.Log("app", "", "", "Failed to reload settings: " + ex.Message);
+                    }
+
                     return Results.Ok(new { ok = true });
                 });
 

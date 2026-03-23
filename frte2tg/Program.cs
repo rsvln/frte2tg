@@ -41,17 +41,13 @@ namespace frte2tg
 
         static async Task Main(string[] args)
         {
-
             appLocation = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
             settings = new SettingsFile();
             string fs;
             if (args.Length == 0)
-                fs = "/etc/frte2tg"
-                   //appLocation 
-                   + "/frte2tg.yml";
+                fs = "/etc/frte2tg/frte2tg.yml";
             else
                 fs = args[0];
-
             try
             {
                 settings = (new DeserializerBuilder()
@@ -65,46 +61,46 @@ namespace frte2tg
                 return;
             }
 
+            WebUi.Start(fs);
+            await Initialize();
+            Thread.Sleep(Timeout.Infinite);
+        }
+
+        public static async Task Initialize()
+        {
+            if (goAI) { aiQueue.Stop(); goAI = false; }
+            if (goFR) { frQueue.Stop(); goFR = false; }
+
+            if (mqttClient != null && mqttClient.IsConnected)
+                await mqttClient.DisconnectAsync();
+
             bot = new TelegramBotClient(
-                            new TelegramBotClientOptions(
-                            token: settings.telegram.token,
-                            baseUrl: string.IsNullOrEmpty(settings.telegram.apiserver) ? null : settings.telegram.apiserver)
-                      );
-
+                new TelegramBotClientOptions(
+                    token: settings.telegram.token,
+                    baseUrl: string.IsNullOrEmpty(settings.telegram.apiserver) ? null : settings.telegram.apiserver));
             bot.StartReceiving(
-                            updateHandler: TgHandleUpdateAsync,
-                            errorHandler: TgHandlePollingErrorAsync,
-                            receiverOptions: new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() },
-                            cancellationToken: CancellationToken.None
-                      );
-
+                updateHandler: TgHandleUpdateAsync,
+                errorHandler: TgHandlePollingErrorAsync,
+                receiverOptions: new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() },
+                cancellationToken: CancellationToken.None);
             _ = Task.Run(() => bot.GetMe());
-
             Log("app", "", "", "Telegram bot polling started");
 
-            WebUi.Start(fs);
-
-            if (settings.ai != null &&
-                !string.IsNullOrEmpty(settings.ai.url) &&
-                !string.IsNullOrEmpty(settings.ai.model))
+            if (settings.ai != null && !string.IsNullOrEmpty(settings.ai.url) && !string.IsNullOrEmpty(settings.ai.model))
             {
                 aiQueue = new AIQueueService(bot, settings.ai);
                 aiQueue.Start();
                 goAI = true;
             }
-            else
-                Log("app", "", "", "AI service not configured, skipping");
+            else Log("app", "", "", "AI service not configured, skipping");
 
-            if (settings.fr != null && 
-                !string.IsNullOrEmpty(settings.fr.url) && 
-                !string.IsNullOrEmpty(settings.fr.apikey))
+            if (settings.fr != null && !string.IsNullOrEmpty(settings.fr.url) && !string.IsNullOrEmpty(settings.fr.apikey))
             {
                 frQueue = new FRQueueService(bot, settings.fr);
                 frQueue.Start();
                 goFR = true;
             }
-            else
-                Log("app", "", "", "AI face recognition service not configured, skipping");
+            else Log("app", "", "", "FR service not configured, skipping");
 
             try
             {
@@ -114,38 +110,23 @@ namespace frte2tg
                     .WithClientId("frte2tg")
                     .WithTcpServer(settings.mqtt.host, settings.mqtt.port)
                     .WithCredentials(settings.mqtt.user, settings.mqtt.password)
-                    //                .WithTls()
                     .WithCleanSession()
                     .Build();
-
                 mqttClient.ApplicationMessageReceivedAsync += MqttClientApplicationMessageReceivedAsync;
                 mqttClient.ConnectedAsync += MqttClientConnectedAsync;
                 mqttClient.DisconnectedAsync += MqttClientDisconnectedAsync;
-
-                try
-                {
-                    await mqttClient.ConnectAsync(mqttOptions);
-                }
-                catch (Exception exception)
-                {
-                    Log("app", "", "", "Connecting to mqtt server " + settings.mqtt.host + ":" + settings.mqtt.port.ToString() + " failed" + exception);
-                }
-
+                await mqttClient.ConnectAsync(mqttOptions);
                 Log("app", "", "", "Waiting for mqtt messages");
-
                 var mqttSubscribeOptions = new MqttClientSubscribeOptionsBuilder()
-                                                    .WithTopicFilter(f => f.WithTopic(settings.mqtt.eventstopic))
-                                                    .WithTopicFilter(f => f.WithTopic(settings.mqtt.reviewstopic))
-                                                    .Build();
+                    .WithTopicFilter(f => f.WithTopic(settings.mqtt.eventstopic))
+                    .WithTopicFilter(f => f.WithTopic(settings.mqtt.reviewstopic))
+                    .Build();
                 await mqttClient.SubscribeAsync(mqttSubscribeOptions, CancellationToken.None);
-
             }
-            catch (Exception exception)
+            catch (Exception ex)
             {
-                ConsoleLog("app", "", "", exception.ToString());
+                ConsoleLog("app", "", "", ex.ToString());
             }
-
-            Thread.Sleep(Timeout.Infinite);
         }
 
         private static async Task<T> TgCall<T>(Func<Task<T>> call, string type, string eventId, string camera)
