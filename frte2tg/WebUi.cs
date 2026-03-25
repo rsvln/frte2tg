@@ -245,6 +245,8 @@ namespace frte2tg
               .log-type  { }
               .log-type.app { color: var(--accent); }
               .log-type.tg { color: var(--accent); }
+              .log-type.fr { color: #bc8cff; }
+              .log-type.ai { color: #ff7b72; }
               .log-type.review { color: var(--green); }
               .log-type.event { color: var(--orange); }
               .log-id    { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -299,7 +301,7 @@ namespace frte2tg
 
             <header>
               <div class="dot"></div>
-              <h1>Frigate TrueEnd Event to Telegram</h1>
+              <h1>Frigate TrueEnd Events and Reviews to Telegram</h1>
               <div class="tabs">
                 <button class="tab active" onclick="switchTab('log')">Log</button>
                 <button class="tab" onclick="switchTab('config')">Config</button>

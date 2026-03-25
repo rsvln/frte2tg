@@ -159,6 +159,7 @@ namespace frte2tg
         public string nonhumanprompt { get; set; }
         public int numpredict { get; set; } = 150;
         public double temperature { get; set; } = 0.1;
+        public bool thinking { get; set; } = false;
         public int resizetowidth { get; set; } = 640;
     }
 
@@ -279,6 +280,13 @@ namespace frte2tg
     public class OllamaResponse
     {
         public string response { get; set; }
+        public string thinking { get; set; }
+    }
+
+    public class OllamaMessage
+    {
+        public string content { get; set; }
+        public string thinking { get; set; }
     }
 
 

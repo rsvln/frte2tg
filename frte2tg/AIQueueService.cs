@@ -16,7 +16,9 @@ namespace frte2tg
         private readonly string aiModel;
         private readonly int numPredict;
         private readonly double temperature;
+        private readonly bool thinking;
         private readonly int resizeToWidth;
+        private int activeCount = 0;
 
         private Task workerTask;
 
@@ -53,7 +55,7 @@ namespace frte2tg
         {
             task.QueuedAt = DateTime.Now;
             queue.Enqueue(task);
-            Program.Log("ai", task.EventId, task.Camera, $"Added to queue ({queue.Count} in queue)");
+            Program.Log("ai", task.EventId, task.Camera, $"Added to queue ({queue.Count} in queue, {activeCount} active)");
         }
 
         private async Task ProcessQueueAsync(CancellationToken cancellationToken)
@@ -65,7 +67,7 @@ namespace frte2tg
                     if (queue.TryDequeue(out var task))
                     {
                         await semaphore.WaitAsync(cancellationToken);
-                        
+                        Interlocked.Increment(ref activeCount);
                         _ = Task.Run(async () =>
                         {
                             try
@@ -74,6 +76,7 @@ namespace frte2tg
                             }
                             finally
                             {
+                                Interlocked.Decrement(ref activeCount);
                                 semaphore.Release();
                             }
                         }, cancellationToken);
@@ -155,7 +158,7 @@ namespace frte2tg
                 var requestBody = new
                 {
                     model = aiModel,
-                    prompt = prompt,
+                    prompt = thinking ? prompt : "/no_think " + prompt,
                     images = new[] { imageBase64 },
                     stream = false,
                     options = new
@@ -172,9 +175,22 @@ namespace frte2tg
                 response.EnsureSuccessStatusCode();
 
                 var responseJson = await response.Content.ReadAsStringAsync();
+                
                 var ollamaResponse = System.Text.Json.JsonSerializer.Deserialize<OllamaResponse>(responseJson);
 
-                var description = ollamaResponse?.response?.Trim();
+                var description = (!string.IsNullOrEmpty(ollamaResponse?.response)
+                                    ? ollamaResponse.response
+                                    : ollamaResponse?.thinking)?.Trim();
+
+                if (!string.IsNullOrEmpty(description))
+                {
+                    int closeIdx = description.IndexOf("</think>");
+                    if (closeIdx >= 0)
+                        description = description.Substring(closeIdx + 8).Trim();
+                    else if (description.Contains("<think>"))
+                        description = description.Substring(0, description.IndexOf("<think>")).Trim();
+                }
+
                 if (string.IsNullOrEmpty(description))
                     return null;
 
@@ -193,6 +209,8 @@ namespace frte2tg
             try
             {
                 var caption = task.OriginalCaption + "\n\n" + description;
+                if (caption.Length > 1024)
+                    caption = caption.Substring(0, 1021) + "...";
 
                 await tgBotClient.EditMessageCaption(
                     chatId: task.ChatId,
