@@ -128,6 +128,7 @@ ai:
   numpredict: 150              # max tokens in Ollama response, limits description length
   temperature: 0.1             # lower = more deterministic, higher = more creative
   resizetowidth: 640           # resize image before sending to Ollama, 0 to disable
+  thinking: false              # enable chain-of-thought thinking mode; only useful for debugging, not recommended for production use
 
 # Optional: face recognition via CompreFace
 fr:
@@ -164,7 +165,7 @@ When the `fr` section is present and `url`/`apikey` are set, enabling `fr: true`
 
 If `ai: true` is also enabled on the camera, recognized names are automatically passed to Ollama as context, enriching the description prompt. If only `fr` is enabled without `ai`, the caption is updated with recognized names directly.
 
-To set up CompreFace, open the web UI, create an application, add a Recognition Service, and upload face photos for each person via the Train section.
+To set up CompreFace, use the provided `docker-compose-compreface.yml`, then open the web UI, create an application, add a Recognition Service, and upload face photos for each person via the Train section.
 
 ## AI Analysis
 
