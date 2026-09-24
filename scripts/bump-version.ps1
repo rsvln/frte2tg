@@ -31,7 +31,7 @@ function Get-SourceFileHashes {
     $abs = [IO.Path]::GetFullPath($projectDir)
     $result = [ordered]@{}
     Get-ChildItem $projectDir -Recurse -File |
-        Where-Object { $_.Extension -in '.cs', '.csproj', '.props', '.json', '.js' -or $_.Name -eq 'Dockerfile' } |
+        Where-Object { $_.Extension -in '.cs', '.csproj', '.props', '.json', '.js', '.svg' -or $_.Name -eq 'Dockerfile' } |
         Sort-Object FullName |
         ForEach-Object {
             $rel = $_.FullName.Substring($abs.Length).TrimStart('\', '/')

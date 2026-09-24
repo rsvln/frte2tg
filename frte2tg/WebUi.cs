@@ -135,6 +135,13 @@ namespace frte2tg
                     return File.Exists(path) ? Results.File(path, "text/javascript") : Results.NotFound();
                 });
 
+                // Frigate's logo in red.
+                app.MapGet("/favicon.svg", () =>
+                {
+                    string path = Path.Combine(Program.appLocation, "web", "favicon.svg");
+                    return File.Exists(path) ? Results.File(path, "image/svg+xml") : Results.NotFound();
+                });
+
                 // Version and the README rendered to HTML for the About tab.
                 app.MapGet("/api/about", () => Safe(() =>
                 {
@@ -276,6 +283,7 @@ namespace frte2tg
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>frte2tg</title>
+            <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=%VERSION%">
             <style>
               @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 
