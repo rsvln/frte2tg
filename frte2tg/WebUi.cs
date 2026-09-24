@@ -506,11 +506,11 @@ namespace frte2tg
               <div class="dot"></div>
               <h1>Frigate TrueEnd Events and Reviews to Telegram</h1>
               <div class="tabs">
-                <button class="tab active" onclick="switchTab('log')">{{web.tab.log}}</button>
-                <button class="tab" onclick="switchTab('last')">{{web.tab.last}}</button>
-                <button class="tab" onclick="switchTab('stats')">{{web.tab.stats}}</button>
-                <button class="tab" onclick="switchTab('config')">{{web.tab.config}}</button>
-                <button class="tab" onclick="switchTab('about')">{{web.tab.about}}</button>
+                <button class="tab active" data-tab="log" onclick="switchTab('log')">{{web.tab.log}}</button>
+                <button class="tab" data-tab="last" onclick="switchTab('last')">{{web.tab.last}}</button>
+                <button class="tab" data-tab="stats" onclick="switchTab('stats')">{{web.tab.stats}}</button>
+                <button class="tab" data-tab="config" onclick="switchTab('config')">{{web.tab.config}}</button>
+                <button class="tab" data-tab="about" onclick="switchTab('about')">{{web.tab.about}}</button>
               </div>
             </header>
 
@@ -642,11 +642,50 @@ namespace frte2tg
             <script>
             let refreshTimer = null;
 
+            // The active tab and toolbar values are kept in this browser's localStorage, so F5 restores them.
+            const STATE_KEY = 'frte2tg.ui';
+            const PERSISTED = ['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'autoscroll', 'refresh-interval',
+                               'last-camera', 'last-label', 'last-limit', 'last-refresh',
+                               'stat-period', 'stat-camera', 'stat-label'];
+
+            function readState() {
+              try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; } catch { return {}; }
+            }
+
+            // Camera/object lists are filled by loadMeta(); until then their saved values are kept as they are.
+            const META_FIELDS = ['last-camera', 'last-label', 'last-limit', 'stat-camera', 'stat-label'];
+
+            function saveState() {
+              const prev = readState().fields || {};
+              const state = { tab: document.querySelector('.tab.active')?.dataset.tab || 'log', fields: {} };
+              PERSISTED.forEach(id => {
+                const el = document.getElementById(id);
+                if (!metaLoaded && META_FIELDS.includes(id)) { if (id in prev) state.fields[id] = prev[id]; }
+                else if (el) state.fields[id] = el.type === 'checkbox' ? el.checked : el.value;
+              });
+              try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch { }
+            }
+
+            // Selects get a saved value only if they have such an option (camera lists come from /api/meta).
+            function restoreFields(ids) {
+              const fields = readState().fields || {};
+              ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el || !(id in fields)) return;
+                if (el.type === 'checkbox') el.checked = !!fields[id];
+                else if (el.tagName !== 'SELECT' || [...el.options].some(o => o.value === fields[id])) el.value = fields[id];
+              });
+            }
+
+            document.addEventListener('change', e => { if (PERSISTED.includes(e.target.id)) saveState(); });
+            document.addEventListener('input', e => { if (PERSISTED.includes(e.target.id)) saveState(); });
+
             function switchTab(name) {
-              document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+              if (!document.getElementById('panel-' + name)) name = 'log';
+              document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
               document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-              event.target.classList.add('active');
               document.getElementById('panel-' + name).classList.add('active');
+              saveState();
               if (name === 'config') loadConfig();
               clearInterval(lastTimer);
               if (name === 'last') { loadMeta().then(loadLast); setLastRefresh(); }
@@ -675,6 +714,8 @@ namespace frte2tg
               const statLabel = document.getElementById('stat-label');
               statLabel.insertAdjacentHTML('afterbegin', '<option value="config">{{web.filter_config}}</option>');
               statLabel.value = 'config';
+              restoreFields(META_FIELDS);
+              updateLastLimitLabel();
               metaLoaded = true;
             }
 
@@ -694,10 +735,16 @@ namespace frte2tg
             }
 
             // One camera: show its history (20 by default); all cameras: N latest of each (1 by default).
-            function lastCameraChanged() {
+            function updateLastLimitLabel() {
               const cam = document.getElementById('last-camera').value;
               document.getElementById('last-limit-label').textContent = cam ? t('web.events_limit') : t('web.per_camera');
+            }
+
+            function lastCameraChanged() {
+              const cam = document.getElementById('last-camera').value;
+              updateLastLimitLabel();
               document.getElementById('last-limit').value = cam ? '20' : '1';
+              saveState();
               loadLast();
             }
 
@@ -801,6 +848,7 @@ namespace frte2tg
             function filterStats(camera, label) {
               if (camera !== undefined) document.getElementById('stat-camera').value = camera;
               if (label !== undefined) document.getElementById('stat-label').value = label;
+              saveState();
               loadStats();
             }
 
@@ -958,8 +1006,11 @@ namespace frte2tg
             }
 
 
+            restoreFields(['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'autoscroll', 'refresh-interval',
+                           'last-refresh', 'stat-period']);
             loadLog();
             setRefresh();
+            switchTab(readState().tab || 'log');
             </script>
             </body>
             </html>
