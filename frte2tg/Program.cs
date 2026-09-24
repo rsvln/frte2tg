@@ -54,6 +54,7 @@ namespace frte2tg
                 return;
             }
 
+            Log("app", "", "", "frte2tg v" + VersionInfo.Informational + " started");
             WebUi.Start(fs);
             await Initialize();
             Thread.Sleep(Timeout.Infinite);
@@ -1445,7 +1446,7 @@ namespace frte2tg
             if (command == "/private" || command == "/help" || command == "/start")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending help");
-                string helpText = L10n.T("tg.help");
+                string helpText = L10n.T("tg.help") + "\n\n" + L10n.T("tg.help.version", VersionInfo.Version);
                 await TgCall(() => botClient.SendMessage(
                     chatId: message.Chat.Id,
                     text: helpText,

@@ -8,10 +8,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(tr -d '[:space:]' < frte2tg/version.txt)" >> $GITHUB_OUTPUT
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -26,4 +30,17 @@ jobs:
           context: .
           file: ./frte2tg/Dockerfile
           push: true
-          tags: ghcr.io/rsvln/frte2tg:latest
+          tags: |
+            ghcr.io/rsvln/frte2tg:latest
+            ghcr.io/rsvln/frte2tg:${{ steps.version.outputs.version }}
+
+      - name: Tag release
+        run: |
+          TAG=v${{ steps.version.outputs.version }}
+          git fetch --tags --quiet
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi

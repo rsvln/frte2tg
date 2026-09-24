@@ -79,7 +79,7 @@ namespace frte2tg
                     catch (Exception ex) { return Results.Problem(ex.Message); }
                 });
 
-                // Event clip (finished events only); ?download=1 sends it as an attachment.
+                // Event clip built from Frigate's recording segments (up to now for events in progress); ?download=1 sends it as an attachment.
                 app.MapGet("/api/clip/{id}", async (string id, int? download) =>
                 {
                     try
@@ -94,6 +94,16 @@ namespace frte2tg
                     }
                     catch (Exception ex) { return Results.Problem(ex.Message); }
                 });
+
+                // Version and the README rendered to HTML for the About tab.
+                app.MapGet("/api/about", () => Safe(() =>
+                {
+                    string readmePath = Path.Combine(Program.appLocation, "README.md");
+                    string readme = File.Exists(readmePath)
+                        ? Markdig.Markdown.ToHtml(File.ReadAllText(readmePath), Markdig.MarkdownExtensions.UseAdvancedExtensions(new Markdig.MarkdownPipelineBuilder()).Build())
+                        : "";
+                    return Results.Ok(new { version = VersionInfo.Version, build = VersionInfo.BuildDate, url = VersionInfo.ProjectUrl, readme });
+                }));
 
                 app.MapGet("/api/config", () =>
                 {
@@ -140,6 +150,9 @@ namespace frte2tg
         static string Localize(string html)
         {
             html = System.Text.RegularExpressions.Regex.Replace(html, @"\{\{([\w.]+)\}\}", m => System.Net.WebUtility.HtmlEncode(L10n.T(m.Groups[1].Value)));
+            html = html.Replace("%VERSION%", System.Net.WebUtility.HtmlEncode(VersionInfo.Version))
+                       .Replace("%BUILD%", System.Net.WebUtility.HtmlEncode(VersionInfo.BuildDate))
+                       .Replace("%URL%", VersionInfo.ProjectUrl);
             return html.Replace("/*I18N*/{}", System.Text.Json.JsonSerializer.Serialize(L10n.Export("web.", "label.")));
         }
 
@@ -436,6 +449,40 @@ namespace frte2tg
               .bar-axis { display: flex; gap: 3px; margin-top: 4px; }
               .bar-axis span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; min-width: 0; overflow: hidden; }
 
+              .app-footer {
+                flex-shrink: 0;
+                display: flex;
+                gap: 16px;
+                align-items: center;
+                padding: 6px 20px;
+                background: var(--bg2);
+                border-top: 1px solid var(--border);
+                color: var(--muted);
+                font-size: 12px;
+              }
+              .app-footer b { color: var(--text); font-weight: 500; }
+              .app-footer a, .about-meta a { color: var(--accent); text-decoration: none; }
+              .app-footer a:hover, .about-meta a:hover { text-decoration: underline; }
+
+              .about-head { margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+              .about-name { font-family: 'JetBrains Mono', monospace; font-size: 22px; color: var(--accent); }
+              .about-meta { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 6px; color: var(--muted); font-size: 13px; }
+              .about-meta b { color: var(--text); font-weight: 500; }
+
+              .markdown { max-width: 980px; line-height: 1.6; }
+              .markdown h1 { font-size: 22px; margin: 18px 0 10px; }
+              .markdown h2 { font-size: 18px; margin: 24px 0 10px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+              .markdown h3 { font-size: 15px; margin: 18px 0 8px; }
+              .markdown p, .markdown ul, .markdown ol, .markdown table, .markdown pre { margin: 0 0 12px; }
+              .markdown ul, .markdown ol { padding-left: 24px; }
+              .markdown a { color: var(--accent); }
+              .markdown code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: var(--bg3); padding: 1px 5px; border-radius: 4px; }
+              .markdown pre { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; }
+              .markdown pre code { background: none; padding: 0; }
+              .markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+              .markdown th, .markdown td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
+              .markdown th { background: var(--bg2); }
+
               .toast {
                 position: fixed;
                 bottom: 24px;
@@ -463,6 +510,7 @@ namespace frte2tg
                 <button class="tab" onclick="switchTab('last')">{{web.tab.last}}</button>
                 <button class="tab" onclick="switchTab('stats')">{{web.tab.stats}}</button>
                 <button class="tab" onclick="switchTab('config')">{{web.tab.config}}</button>
+                <button class="tab" onclick="switchTab('about')">{{web.tab.about}}</button>
               </div>
             </header>
 
@@ -564,7 +612,29 @@ namespace frte2tg
                 <textarea id="config-editor" spellcheck="false"></textarea>
               </div>
 
+              <div class="panel" id="panel-about">
+                <div class="scroll">
+                  <div class="about-head">
+                    <div class="about-name">frte2tg</div>
+                    <div class="about-meta">
+                      <span>{{web.about.version}} <b>%VERSION%</b></span>
+                      <span>{{web.about.build}} <b>%BUILD%</b></span>
+                      <a href="%URL%" target="_blank" rel="noopener">GitHub</a>
+                      <a href="%URL%/releases" target="_blank" rel="noopener">{{web.about.changes}}</a>
+                      <span>MIT</span>
+                    </div>
+                  </div>
+                  <div class="markdown" id="about-readme"></div>
+                </div>
+              </div>
+
             </div>
+
+            <footer class="app-footer">
+              <span>frte2tg <b>v%VERSION%</b></span>
+              <span>{{web.about.build}} %BUILD%</span>
+              <a href="%URL%" target="_blank" rel="noopener">GitHub</a>
+            </footer>
 
             <div class="toast" id="toast"></div>
             <div class="lightbox" id="lightbox" onclick="closeLightbox(event)"><img id="lightbox-img" alt=""><video id="lightbox-video" controls playsinline></video></div>
@@ -581,6 +651,7 @@ namespace frte2tg
               clearInterval(lastTimer);
               if (name === 'last') { loadMeta().then(loadLast); setLastRefresh(); }
               if (name === 'stats') loadMeta().then(loadStats);
+              if (name === 'about') loadAbout();
             }
 
             const I18N = /*I18N*/{};
@@ -669,12 +740,23 @@ namespace frte2tg
                     <div class="row1"><span class="cam">${esc(r.camera)}${r.end_time === null ? ` <span class="live">● ${esc(t('web.in_progress'))}</span>` : ''}</span>
                       <span class="when" title="${esc(r.start_local)}">${esc(r.start_local.slice(5, 16))} · ${ago(r.start_time)}</span></div>
                     ${r.zones.length ? `<div class="zones">${esc(r.zones.join(', '))}</div>` : ''}
-                    ${r.has_clip && r.end_time !== null ? `<div class="actions">
+                    <div class="actions">
                       <button class="act" data-id="${esc(r.id)}" onclick="openVideo(this.dataset.id)">▶ ${esc(t('web.video'))}</button>
                       <a class="act" href="/api/clip/${encodeURIComponent(r.id)}?download=1" title="${esc(t('web.download'))}">⬇</a>
-                    </div>` : ''}
+                    </div>
                   </div>
                 </div>`;
+            }
+
+            let aboutLoaded = false;
+            async function loadAbout() {
+              if (aboutLoaded) return;
+              const res = await fetch('/api/about');
+              if (!res.ok) return;
+              const data = await res.json();
+              document.getElementById('about-readme').innerHTML = data.readme;
+              document.querySelectorAll('#about-readme a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+              aboutLoaded = true;
             }
 
             function openLightbox(src) {

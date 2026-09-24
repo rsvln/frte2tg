@@ -29,6 +29,7 @@
   "tg.cmd.stat": "Статистика [24h|7d|30d|today] [камера|объект]",
   "tg.cmd.help": "Справка",
   "tg.help": "*frte2tg* — Frigate NVR → Telegram bridge\n\nПодписывается на MQTT события Frigate и отправляет снапшоты, видеоклипы и GIF-превью в Telegram.\n\n*Команды:*\n/status — текущая обстановка с камер\n/last \\[N] \\[объект] — последние N событий с каждой камеры (например `/last 3 person`)\n/last камера \\[N] \\[объект] — последние N событий одной камеры\n/stat \\[24h|7d|30d|today] \\[камера|объект] — статистика событий\n/help — эта справка\n\n*Проект:* [github.com/rsvln/frte2tg](https://github.com/rsvln/frte2tg)\n\n*Лицензия:* MIT",
+  "tg.help.version": "*Версия:* {0}",
   "tg.status.caption": "Текущая обстановка",
 
   "tg.last.none": "Событий не найдено",
@@ -62,6 +63,10 @@
   "web.tab.last": "Последние",
   "web.tab.stats": "Статистика",
   "web.tab.config": "Конфиг",
+  "web.tab.about": "О программе",
+  "web.about.version": "Версия",
+  "web.about.build": "сборка",
+  "web.about.changes": "Релизы",
   "web.lines": "Строк:",
   "web.type": "Тип:",
   "web.camera": "Камера:",

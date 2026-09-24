@@ -57,35 +57,95 @@ namespace frte2tg
             }
         }
 
+        static readonly TimeSpan LiveClipTtl = TimeSpan.FromSeconds(30);
         static string ClipCacheDir => Path.Combine(Program.appLocation, "clipcache");
         static readonly HttpClient clipHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
 
-        // Event clip from Frigate's API, cached on disk so the browser can seek in it (Frigate doesn't serve ranges).
-        // Only for finished events: Frigate has no clip for an event still in progress. Returns null if unavailable.
+        // Event clip for the web UI, cached on disk so the browser can seek in it.
+        // Built the way the bot builds clips: Frigate's recording segments covering the event, joined by ffmpeg
+        // (Frigate's own clip.mp4 is unreliable when streams are out of sync). Frigate's clip is used only when no
+        // segment is on disk. Returns null if nothing is available.
         public static async Task<string> GetClipPathAsync(EventRow ev)
         {
-            if (ev.end_time == null || !ev.has_clip)
-                return null;
-
             Directory.CreateDirectory(ClipCacheDir);
             foreach (var old in Directory.GetFiles(ClipCacheDir).Where(f => System.IO.File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddHours(-1)))
                 try { System.IO.File.Delete(old); } catch { }
 
-            string path = Path.Combine(ClipCacheDir, ev.camera + "-" + ev.id + ".mp4");
-            if (System.IO.File.Exists(path))
+            // An event still in progress gets the recording up to now; that clip is rebuilt when older than
+            // LiveClipTtl, but reused meanwhile, since the player sends several range requests for one playback.
+            bool live = ev.end_time == null;
+            string path = Path.Combine(ClipCacheDir, ev.camera + "-" + ev.id + (live ? "-live" : "") + ".mp4");
+            if (System.IO.File.Exists(path) && (!live || System.IO.File.GetLastWriteTimeUtc(path) > DateTime.UtcNow - LiveClipTtl))
                 return path;
 
+            string tmp = Path.Combine(ClipCacheDir, Guid.NewGuid().ToString("N") + ".mp4");
+            var segments = GetRecordingSegments(ev);
+            if (segments.Count > 0 && await ConcatSegmentsAsync(segments, tmp))
+            {
+                System.IO.File.Move(tmp, path, overwrite: true);
+                return path;
+            }
+            try { System.IO.File.Delete(tmp); } catch { }
+
+            if (live || !ev.has_clip)
+                return null;
             var f = Program.settings.frigate;
             using var response = await clipHttp.GetAsync("http://" + f.host + ":" + f.port + "/api/events/" + Uri.EscapeDataString(ev.id) + "/clip.mp4",
                                                          HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode)
                 return null;
-
-            string tmp = path + "." + Guid.NewGuid().ToString("N") + ".part";
             using (var fs = System.IO.File.Create(tmp))
                 await response.Content.CopyToAsync(fs);
             System.IO.File.Move(tmp, path, overwrite: true);
             return path;
+        }
+
+        // Local paths of the camera's recording segments overlapping the event, in order.
+        static List<string> GetRecordingSegments(EventRow ev)
+        {
+            var f = Program.settings.frigate;
+            var result = new List<string>();
+            using var db = Open();
+            using var cmd = new SqliteCommand("SELECT path FROM recordings WHERE camera = $camera AND end_time > $start AND start_time < $end ORDER BY start_time", db);
+            cmd.Parameters.AddWithValue("$camera", ev.camera);
+            cmd.Parameters.AddWithValue("$start", ev.start_time);
+            cmd.Parameters.AddWithValue("$end", ev.end_time ?? (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds);
+            using var dr = cmd.ExecuteReader();
+            while (dr.Read())
+            {
+                string real = dr.GetString(0).Replace(f.recordingsoriginalpath, f.recordingspath);
+                if (System.IO.File.Exists(real))
+                    result.Add(real);
+            }
+            return result;
+        }
+
+        static async Task<bool> ConcatSegmentsAsync(List<string> segments, string mp4Path)
+        {
+            string listPath = mp4Path + ".txt";
+            await System.IO.File.WriteAllLinesAsync(listPath, segments.Select(p => "file '" + p.Replace("'", "'\\''") + "'"));
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg") { UseShellExecute = false, RedirectStandardError = true };
+                foreach (var a in new[] { "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listPath,
+                                          "-c", "copy", "-movflags", "+faststart", mp4Path })
+                    psi.ArgumentList.Add(a);
+                using var p = System.Diagnostics.Process.Start(psi);
+                string err = await p.StandardError.ReadToEndAsync();
+                await p.WaitForExitAsync();
+                if (p.ExitCode != 0)
+                    Program.Log("app", "", "", "ffmpeg failed to build web clip: " + err.Trim());
+                return p.ExitCode == 0 && System.IO.File.Exists(mp4Path) && new FileInfo(mp4Path).Length > 0;
+            }
+            catch (Exception ex)
+            {
+                Program.Log("app", "", "", "ffmpeg failed to build web clip: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                try { System.IO.File.Delete(listPath); } catch { }
+            }
         }
 
         public static MetaResult GetMeta()

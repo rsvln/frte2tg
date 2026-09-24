@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <!--
+    Version comes from version.txt ("Major.Minor.Patch"), read at evaluation time.
+    It is bumped by scripts/bump-version.ps1 (run by publish.bat) before a release build, never during a build.
+  -->
+  <PropertyGroup>
+    <Frte2tgVersionFile>$(MSBuildThisFileDirectory)version.txt</Frte2tgVersionFile>
+    <Frte2tgVersion Condition="Exists('$(Frte2tgVersionFile)')">$([System.IO.File]::ReadAllText('$(Frte2tgVersionFile)').Trim())</Frte2tgVersion>
+    <Frte2tgVersion Condition="'$(Frte2tgVersion)' == ''">1.0.0</Frte2tgVersion>
+
+    <Frte2tgMajor>$([System.Version]::Parse('$(Frte2tgVersion)').Major)</Frte2tgMajor>
+    <Frte2tgMinor>$([System.Version]::Parse('$(Frte2tgVersion)').Minor)</Frte2tgMinor>
+    <Frte2tgPatch>$([System.Version]::Parse('$(Frte2tgVersion)').Build)</Frte2tgPatch>
+
+    <Version>$(Frte2tgVersion)</Version>
+    <AssemblyVersion>$(Frte2tgMajor).$(Frte2tgMinor).$(Frte2tgPatch).0</AssemblyVersion>
+    <FileVersion>$(Frte2tgMajor).$(Frte2tgMinor).$(Frte2tgPatch).0</FileVersion>
+    <Frte2tgBuildDate>$([System.DateTime]::UtcNow.ToString("yyyy.MM.dd"))</Frte2tgBuildDate>
+    <InformationalVersion>$(Frte2tgVersion)+$(Frte2tgBuildDate)</InformationalVersion>
+  </PropertyGroup>
+</Project>

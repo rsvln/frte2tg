@@ -192,6 +192,9 @@ Available at `http://<host>:8888`
 - **Last** — latest N events of every camera (grouped by camera) or the history of one camera, as snapshot cards with object, score, time and zones. Click a snapshot to enlarge it. Finished events have **▶ Video** (plays the clip in the page, with seeking) and **⬇** (downloads the clip) buttons; in-progress events show the current frame from Frigate
 - **Stats** — events / alerts / detections for a period (24 h, today, 7 d, 30 d), cameras × objects matrix, activity by hour of day and by day. The object filter defaults to **Config** — only cameras and objects the bot is configured to send; **All** shows everything Frigate saw. Click a matrix cell to filter by that camera and object
 - **Config** — config editor with backup on save
+- **About** — version, build date, links and this manual
+
+The version and build date are shown in the footer of every page.
 
 ## Localization
 
@@ -218,7 +221,7 @@ Objects can be given by their Frigate label (`person`) or by their name in any l
 
 ## Building
 
-Pushing to `master` branch triggers an automatic build via GitHub Actions and publishes the image to `ghcr.io/rsvln/frte2tg:latest`.
+Pushing to `master` branch triggers an automatic build via GitHub Actions and publishes the image to `ghcr.io/rsvln/frte2tg:latest` and `ghcr.io/rsvln/frte2tg:<version>`.
 
 To build manually:
 
