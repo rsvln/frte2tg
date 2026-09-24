@@ -68,8 +68,7 @@ namespace frte2tg
         public static async Task<string> GetClipPathAsync(EventRow ev)
         {
             Directory.CreateDirectory(ClipCacheDir);
-            foreach (var old in Directory.GetFiles(ClipCacheDir).Where(f => System.IO.File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddHours(-1)))
-                try { System.IO.File.Delete(old); } catch { }
+            CleanClipCache();
 
             // An event still in progress gets the recording up to now; that clip is rebuilt when older than
             // LiveClipTtl, but reused meanwhile, since the player sends several range requests for one playback.
@@ -98,6 +97,62 @@ namespace frte2tg
                 await response.Content.CopyToAsync(fs);
             System.IO.File.Move(tmp, path, overwrite: true);
             return path;
+        }
+
+        static readonly TimeSpan ClipCacheTtl = TimeSpan.FromHours(1);
+        const long ClipCacheMaxBytes = 500L * 1024 * 1024;
+        static readonly object clipCacheLock = new object();
+
+        // Deletes clips older than ClipCacheTtl, then the oldest ones while the folder is over ClipCacheMaxBytes.
+        // Files written in the last 2 minutes are kept: ffmpeg may still be building them.
+        public static void CleanClipCache()
+        {
+            lock (clipCacheLock)
+            {
+                try
+                {
+                    if (!Directory.Exists(ClipCacheDir))
+                        return;
+                    var now = DateTime.UtcNow;
+                    var files = new DirectoryInfo(ClipCacheDir).GetFiles().OrderBy(f => f.LastWriteTimeUtc).ToList();
+                    long total = files.Sum(f => f.Length);
+                    int removed = 0;
+                    foreach (var f in files)
+                    {
+                        bool expired = f.LastWriteTimeUtc < now - ClipCacheTtl;
+                        bool overCap = total > ClipCacheMaxBytes && f.LastWriteTimeUtc < now.AddMinutes(-2);
+                        if (!expired && !overCap)
+                            continue;
+                        try
+                        {
+                            long len = f.Length;
+                            f.Delete();
+                            total -= len;
+                            removed++;
+                        }
+                        catch { }
+                    }
+                    if (removed > 0)
+                        Program.Log("app", "", "", "Clip cache: removed " + removed + " file(s), " + (total / 1024 / 1024) + " MB left");
+                }
+                catch (Exception ex)
+                {
+                    Program.Log("app", "", "", "Clip cache cleanup failed: " + ex.Message);
+                }
+            }
+        }
+
+        // Runs CleanClipCache at startup and every 10 minutes, so clips don't pile up when nobody plays videos.
+        public static void StartClipCacheCleaner()
+        {
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    CleanClipCache();
+                    await Task.Delay(TimeSpan.FromMinutes(10));
+                }
+            });
         }
 
         // Local paths of the camera's recording segments overlapping the event, in order.

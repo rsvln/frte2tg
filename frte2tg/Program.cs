@@ -57,6 +57,7 @@ namespace frte2tg
 
             Log("app", "", "", "frte2tg v" + VersionInfo.Informational + " started");
             WebUi.Start(fs);
+            StatsService.StartClipCacheCleaner();
             await Initialize();
             Thread.Sleep(Timeout.Infinite);
         }
