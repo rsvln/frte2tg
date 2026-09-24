@@ -939,6 +939,8 @@ namespace frte2tg
             }
 
             // Filter history for the "Back" button: every change of period, camera or object is a step.
+            // With no history (e.g. a filter restored after F5) "Back" leads to the overview: all cameras,
+            // objects as in the config, same period.
             const statHistory = [];
             let statShown = null;
 
@@ -946,8 +948,16 @@ namespace frte2tg
               return ['stat-period', 'stat-camera', 'stat-label'].map(id => document.getElementById(id).value);
             }
 
+            function statOverview(filter) {
+              return [filter[0], '', 'config'];
+            }
+
+            function isStatOverview(filter) {
+              return filter.join('|') === statOverview(filter).join('|');
+            }
+
             async function statBack() {
-              const prev = statHistory.pop();
+              const prev = statHistory.pop() ?? (isStatOverview(statFilter()) ? null : statOverview(statFilter()));
               if (!prev) return;
               ['stat-period', 'stat-camera', 'stat-label'].forEach((id, i) => document.getElementById(id).value = prev[i]);
               statShown = prev;
@@ -962,7 +972,7 @@ namespace frte2tg
                 if (statHistory.length > 30) statHistory.shift();
               }
               statShown = current;
-              document.getElementById('stat-back').style.display = statHistory.length ? '' : 'none';
+              document.getElementById('stat-back').style.display = statHistory.length || !isStatOverview(current) ? '' : 'none';
               const p = new URLSearchParams({ period: document.getElementById('stat-period').value });
               const cam = document.getElementById('stat-camera').value;
               const lbl = document.getElementById('stat-label').value;
