@@ -20,6 +20,7 @@ echo.
 
 :: -------------------------------------------
 :: 2. Docker image -> local registry and Docker Hub (latest + version)
+::    Each tag is pushed separately; the second push only adds the tag, the layers are already there.
 :: -------------------------------------------
 echo Building Docker image...
 docker build -f frte2tg\Dockerfile -t %REGISTRY_LOCAL%/%IMAGE_NAME%:latest -t %REGISTRY_LOCAL%/%IMAGE_NAME%:%VERSION% -t %REGISTRY_HUB%/%IMAGE_NAME%:latest -t %REGISTRY_HUB%/%IMAGE_NAME%:%VERSION% .
@@ -31,12 +32,12 @@ echo   OK: built %IMAGE_NAME%:%VERSION%
 echo.
 
 echo Pushing to %REGISTRY_LOCAL%...
-docker push %REGISTRY_LOCAL%/%IMAGE_NAME%:%VERSION%
+docker push --quiet %REGISTRY_LOCAL%/%IMAGE_NAME%:%VERSION%
 if errorlevel 1 (
     echo   FAILED: docker push %VERSION%
     set /a ERRORS+=1
 )
-docker push %REGISTRY_LOCAL%/%IMAGE_NAME%:latest
+docker push --quiet %REGISTRY_LOCAL%/%IMAGE_NAME%:latest
 if errorlevel 1 (
     echo   FAILED: docker push latest
     set /a ERRORS+=1
@@ -45,12 +46,12 @@ if errorlevel 1 (
 )
 
 echo Pushing to Docker Hub...
-docker push %REGISTRY_HUB%/%IMAGE_NAME%:%VERSION%
+docker push --quiet %REGISTRY_HUB%/%IMAGE_NAME%:%VERSION%
 if errorlevel 1 (
     echo   FAILED: docker push %REGISTRY_HUB%/%IMAGE_NAME%:%VERSION% ^(run "docker login" first^)
     set /a ERRORS+=1
 )
-docker push %REGISTRY_HUB%/%IMAGE_NAME%:latest
+docker push --quiet %REGISTRY_HUB%/%IMAGE_NAME%:latest
 if errorlevel 1 (
     echo   FAILED: docker push %REGISTRY_HUB%/%IMAGE_NAME%:latest
     set /a ERRORS+=1
