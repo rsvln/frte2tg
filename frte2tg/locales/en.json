@@ -32,6 +32,10 @@
   "tg.help.version": "*Version:* {0}",
   "tg.status.caption": "Current view",
 
+  "tg.wait.stat": "Calculating statistics for {0}…",
+  "tg.wait.last": "Collecting the latest events…",
+  "tg.wait.status": "Getting frames from the cameras…",
+
   "tg.last.none": "No events found",
   "tg.last.title_all": "Latest events by camera",
   "tg.last.no_snapshot": "Without snapshot:",
@@ -53,6 +57,7 @@
   "tg.stat.peak": "peak",
   "tg.stat.by_day": "By day",
   "tg.stat.last_event": "last event: {0}",
+  "tg.stat.updated": "updated {0}",
   "tg.stat.btn.24h": "24h",
   "tg.stat.btn.today": "today",
   "tg.stat.btn.7d": "7d",

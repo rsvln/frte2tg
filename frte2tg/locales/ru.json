@@ -32,6 +32,10 @@
   "tg.help.version": "*Версия:* {0}",
   "tg.status.caption": "Текущая обстановка",
 
+  "tg.wait.stat": "Считаю статистику за {0}…",
+  "tg.wait.last": "Собираю последние события…",
+  "tg.wait.status": "Получаю кадры с камер…",
+
   "tg.last.none": "Событий не найдено",
   "tg.last.title_all": "Последние события по камерам",
   "tg.last.no_snapshot": "Без снапшота:",
@@ -53,6 +57,7 @@
   "tg.stat.peak": "пик",
   "tg.stat.by_day": "По дням",
   "tg.stat.last_event": "последнее событие: {0}",
+  "tg.stat.updated": "обновлено {0}",
   "tg.stat.btn.24h": "24ч",
   "tg.stat.btn.today": "сегодня",
   "tg.stat.btn.7d": "7д",

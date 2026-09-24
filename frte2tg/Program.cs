@@ -1502,6 +1502,7 @@ namespace frte2tg
             if (command == "/status")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending status");
+                int? waitId = await TgSendWaitAsync(botClient, message.Chat.Id, L10n.T("tg.wait.status"), cancellationToken);
                 using var db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
                 db.Open();
                 using var dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
@@ -1540,6 +1541,7 @@ namespace frte2tg
                     await TgCall(() => botClient.SendMediaGroup(chatId: message.Chat.Id, media: md.ToList()), "tg", "", message.Chat.Id.ToString());
                     Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Status sent");
                 }
+                await TgDeleteWaitAsync(botClient, message.Chat.Id, waitId);
             }
         }
 
@@ -1582,6 +1584,7 @@ namespace frte2tg
 
         static async Task TgSendLast(ITelegramBotClient botClient, long chatId, string[] args, CancellationToken cancellationToken)
         {
+            int? waitId = null;
             try
             {
                 CommandFilter f = StatsService.ParseArgs(args);
@@ -1590,6 +1593,8 @@ namespace frte2tg
                     await TgSendUnknown(botClient, chatId, f.unknown, cancellationToken);
                     return;
                 }
+
+                waitId = await TgSendWaitAsync(botClient, chatId, L10n.T("tg.wait.last"), cancellationToken);
 
                 // No camera given: last N events of every camera (N defaults to 1). Camera given: last N of that camera (N defaults to 5).
                 bool overview = f.camera == null && f.label == null && f.limit == null;
@@ -1666,6 +1671,10 @@ namespace frte2tg
                 Log("tg", "", chatId.ToString(), "Error: /last failed: " + ex.Message);
                 await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
             }
+            finally
+            {
+                await TgDeleteWaitAsync(botClient, chatId, waitId);
+            }
         }
 
         // Sends the stats message, or edits `editMessageId` in place when a period button was pressed.
@@ -1680,32 +1689,68 @@ namespace frte2tg
                     return;
                 }
 
-                StatsResult st = StatsService.GetStats(f.period, f.camera, f.label);
-                string text = FormatStat(st);
-
                 string suffix = "|" + (f.camera ?? "") + "|" + (f.label ?? "");
                 var periods = new[] { "24h", "today", "7d", "30d" }.Select(p => (L10n.T("tg.stat.btn." + p), p));
                 var keyboard = new InlineKeyboardMarkup(periods
                     .Select(p => InlineKeyboardButton.WithCallbackData(p.Item1, CallbackData("stat|" + p.Item2 + suffix) ?? "stat|" + p.Item2 + "||")));
 
+                // Visible reaction right away: a period button turns the message into "calculating…", a command gets a wait message.
+                StatsService.TryParsePeriod(f.period, out _, out string periodTitle);
+                string waitText = L10n.T("tg.wait.stat", periodTitle);
+                int? waitId = null;
                 if (editMessageId.HasValue)
                 {
                     try
                     {
-                        await TgCall(() => botClient.EditMessageText(chatId, editMessageId.Value, text, parseMode: ParseMode.Html,
-                                                                     replyMarkup: keyboard, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                        await TgCall(() => botClient.EditMessageText(chatId, editMessageId.Value, "⏳ " + waitText, replyMarkup: keyboard,
+                                                                     cancellationToken: cancellationToken), "tg", "", chatId.ToString());
                     }
                     catch (ApiRequestException ex) when (ex.Message.Contains("not modified")) { }
                 }
                 else
+                    waitId = await TgSendWaitAsync(botClient, chatId, waitText, cancellationToken);
+
+                StatsResult st = StatsService.GetStats(f.period, f.camera, f.label);
+                string text = FormatStat(st) + "\n<i>" + L10n.T("tg.stat.updated", DateTime.UtcNow.AddMinutes(settings.options.timeoffset).ToString("HH:mm:ss")) + "</i>";
+
+                if (editMessageId.HasValue)
+                    await TgCall(() => botClient.EditMessageText(chatId, editMessageId.Value, text, parseMode: ParseMode.Html,
+                                                                 replyMarkup: keyboard, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                else
+                {
                     await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html,
                                                              replyMarkup: keyboard, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                    await TgDeleteWaitAsync(botClient, chatId, waitId);
+                }
             }
             catch (Exception ex)
             {
                 Log("tg", "", chatId.ToString(), "Error: /stat failed: " + ex.Message);
                 await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
             }
+        }
+
+        // Slow commands first post a "please wait" message (as y2tav does) and delete it once the result is sent.
+        static async Task<int?> TgSendWaitAsync(ITelegramBotClient botClient, long chatId, string text, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var msg = await TgCall(() => botClient.SendMessage(chatId, "⏳ " + text, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                return msg.MessageId;
+            }
+            catch (Exception ex)
+            {
+                Log("tg", "", chatId.ToString(), "Failed to send the wait message: " + ex.Message);
+                return null;
+            }
+        }
+
+        static async Task TgDeleteWaitAsync(ITelegramBotClient botClient, long chatId, int? messageId)
+        {
+            if (messageId == null)
+                return;
+            try { await botClient.DeleteMessage(chatId, messageId.Value); }
+            catch (Exception ex) { Log("tg", "", chatId.ToString(), "Failed to delete the wait message: " + ex.Message); }
         }
 
         static async Task TgSendUnknown(ITelegramBotClient botClient, long chatId, List<string> unknown, CancellationToken cancellationToken)
