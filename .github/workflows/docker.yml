@@ -34,13 +34,33 @@ jobs:
             ghcr.io/rsvln/frte2tg:latest
             ghcr.io/rsvln/frte2tg:${{ steps.version.outputs.version }}
 
-      - name: Tag release
+      # One release per version: created on the first push of a new version.txt (publish.bat), skipped afterwards.
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          TAG=v${{ steps.version.outputs.version }}
+          TAG="v$VERSION"
           git fetch --tags --quiet
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "Tag $TAG already exists"
-          else
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             git tag "$TAG"
             git push origin "$TAG"
           fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          # Docker Hub is pushed by publish.bat, so list it only when that tag is really there.
+          HUB=""
+          if curl -sf "https://hub.docker.com/v2/repositories/rsvln/frte2tg/tags/$VERSION" >/dev/null; then
+            HUB="docker pull rsvln/frte2tg:$VERSION"
+          fi
+          cat > notes.md <<EOF
+          ### Docker image
+
+          \`\`\`bash
+          docker pull ghcr.io/rsvln/frte2tg:$VERSION
+          $HUB
+          \`\`\`
+          EOF
+          gh release create "$TAG" --title "frte2tg $TAG" --notes-file notes.md --generate-notes --latest
