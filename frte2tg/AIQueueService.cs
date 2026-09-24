@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using Telegram.Bot;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Processing;
 
 namespace frte2tg
 {
@@ -135,6 +133,36 @@ namespace frte2tg
             }
         }
 
+        // Downscales to `width` (never upscales) and returns JPEG bytes, or null if ffmpeg failed.
+        private static async Task<byte[]> ResizeWithFfmpegAsync(string imagePath, int width)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            foreach (var a in new[] { "-hide_banner", "-loglevel", "error", "-i", imagePath,
+                                      "-vf", $"scale='min({width},iw)':-2", "-frames:v", "1", "-q:v", "3",
+                                      "-f", "image2", "-c:v", "mjpeg", "pipe:1" })
+                psi.ArgumentList.Add(a);
+
+            try
+            {
+                using var p = System.Diagnostics.Process.Start(psi);
+                using var ms = new MemoryStream();
+                var stderr = p.StandardError.ReadToEndAsync();
+                await p.StandardOutput.BaseStream.CopyToAsync(ms);
+                await p.WaitForExitAsync();
+                await stderr;
+                return p.ExitCode == 0 && ms.Length > 0 ? ms.ToArray() : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private async Task<string> CallAIApiAsync(string imagePath, string prompt, string eventId, string camera)
         {
             try
@@ -143,14 +171,11 @@ namespace frte2tg
 
                 if (resizeToWidth > 0)
                 {
-                    using var image = Image.Load(imageBytes);
-                    if (image.Width > resizeToWidth)
-                    {
-                        image.Mutate(x => x.Resize(resizeToWidth, 0));
-                        using var ms = new MemoryStream();
-                        image.SaveAsJpeg(ms);
-                        imageBytes = ms.ToArray();
-                    }
+                    var resized = await ResizeWithFfmpegAsync(imagePath, resizeToWidth);
+                    if (resized != null)
+                        imageBytes = resized;
+                    else
+                        Program.Log("ai", eventId, camera, "Resize failed, sending original image");
                 }
                 
                 var imageBase64 = Convert.ToBase64String(imageBytes);

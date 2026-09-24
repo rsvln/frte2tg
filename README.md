@@ -7,7 +7,7 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 ## Features
 
 - Handles both Frigate **events** and **reviews** (configurable per camera)
-- Sends **snapshots** as media groups
+- Sends **snapshots** as media groups; for events still in progress (e.g. a parked car in a review that has already ended) the current best frame is taken from the Frigate API instead of waiting for the file
 - Concatenates and sends **video clips** via ffmpeg
 - Splits large clips automatically
 - Generates and sends **animated GIF previews** (optional, per camera)
@@ -16,7 +16,9 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - **AI-powered snapshot descriptions** via Ollama (optional, per camera) — if both FR and AI are enabled, recognized names are passed to Ollama as context
 - Telegram rate limit handling with automatic retry
 - Per-camera configuration: objects, zones, severity, triggers, behavior
-- Web UI for log viewing and config editing (port 8888)
+- **Telegram commands** `/status`, `/last`, `/stat` — current view, latest N events of every camera, statistics by camera, object, hour and day, with inline buttons
+- **Web UI** (port 8888): live log, latest events with snapshots and **video playback / download**, statistics dashboard, config editor
+- **Localization** of Telegram messages and the web UI (`en`, `ru`, easy to add more)
 - Runs as a Docker container
 
 ## Requirements
@@ -24,7 +26,8 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - [Frigate NVR](https://frigate.video) with MQTT enabled
 - MQTT broker
 - Telegram bot token + local Bot API server (optional but recommended for large files)
-- ffmpeg available in container
+- ffmpeg available in container (used for clips, GIFs and resizing snapshots for AI)
+- Frigate HTTP API reachable at `frigate.host:frigate.port` (for snapshots of in-progress events and clips in the web UI)
 - Ollama instance with a vision model (optional, for AI descriptions)
 - [CompreFace](https://github.com/exadel-inc/CompreFace) instance (optional, for face recognition)
 
@@ -114,6 +117,7 @@ options:
   retry: 30                    # polling interval in seconds
   sendeverythingwhatyouhave: true  # send partial clips if timeout expires
   gifwidth: 640                # GIF preview width in pixels (height is proportional)
+  locale: en                   # language of Telegram messages and the web UI: en, ru (files in locales/)
 
 logger:
   file: true
@@ -176,15 +180,41 @@ When the `ai` section is present and `url`/`model` are set, enabling `ai: true` 
 
 Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
 
+Snapshots wider than `resizetowidth` are downscaled with ffmpeg before being sent to Ollama.
+
 Tested with `qwen2.5vl:7b` on a machine with RTX 3060 — ~2 seconds per image.
 
 ## Web UI
 
 Available at `http://<host>:8888`
 
-- Live log viewer with filtering by type, camera, text
-- Color-coded by event ID
-- Config editor with backup on save
+- **Log** — live log viewer with filtering by type, camera, text, color-coded by event ID
+- **Last** — latest N events of every camera (grouped by camera) or the history of one camera, as snapshot cards with object, score, time and zones. Click a snapshot to enlarge it. Finished events have **▶ Video** (plays the clip in the page, with seeking) and **⬇** (downloads the clip) buttons; in-progress events show the current frame from Frigate
+- **Stats** — events / alerts / detections for a period (24 h, today, 7 d, 30 d), cameras × objects matrix, activity by hour of day and by day. The object filter defaults to **Config** — only cameras and objects the bot is configured to send; **All** shows everything Frigate saw. Click a matrix cell to filter by that camera and object
+- **Config** — config editor with backup on save
+
+## Localization
+
+Telegram messages, bot commands and the web UI are translated. The language is set by `options.locale` (default `en`).
+
+Strings live in `locales/<locale>.json` next to the app (`/app/locales` in the container), one flat `"key": "text"` file per language; `en.json` and `ru.json` are included. To add a language, copy `en.json` to e.g. `de.json`, translate the values and set `locale: de`. Keys missing in a translation fall back to English.
+
+Object names from every locale file are understood in commands, e.g. `/last человек` works with any `locale`.
+
+## Telegram commands
+
+Commands are accepted only from chats listed in `telegram.chatids`. Data for `/last` and `/stat` is read from the Frigate database (`frigate.dbpath`) and snapshots from `frigate.clipspath`.
+
+| Command | Description |
+|---------|-------------|
+| `/status` | Current frame from every camera |
+| `/last` | Latest event of every camera, plus buttons to pick a camera, an object or N per camera |
+| `/last [N] [object]` | Last N events of every camera (default 1), e.g. `/last 3`, `/last 2 person` |
+| `/last <camera> [N] [object]` | Last N events of one camera (default 5), e.g. `/last frontdoor 10`, `/last frontdoor dog` |
+| `/stat [24h\|7d\|30d\|today] [camera\|object]` | Event statistics by object, camera and hour of day, with buttons to switch the period |
+| `/help` | Help |
+
+Objects can be given by their Frigate label (`person`) or by their name in any locale file (`человек`).
 
 ## Building
 

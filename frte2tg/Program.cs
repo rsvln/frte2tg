@@ -12,6 +12,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -20,14 +21,6 @@ namespace frte2tg
     internal class Program
     {
         public static SettingsFile settings;
-        public static Dictionary<string, string> rumapobj = new Dictionary<string, string>()
-                                                    {
-                                                        { "car", "машина" },
-                                                        { "person", "человек" },
-                                                        { "dog", "собака" },
-                                                        { "cat", "кошка" },
-                                                        { "bird", "птица" }
-                                                    };
         public static ITelegramBotClient bot;
         public static SemaphoreSlim tgSemaphore = new SemaphoreSlim(1, 1);
         public static MqttClientFactory mqttFactory;
@@ -68,6 +61,8 @@ namespace frte2tg
 
         public static async Task Initialize()
         {
+            L10n.Load(settings.options.locale);
+
             if (goAI) { aiQueue.Stop(); goAI = false; }
             if (goFR) { frQueue.Stop(); goFR = false; }
 
@@ -84,6 +79,20 @@ namespace frte2tg
                 receiverOptions: new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() },
                 cancellationToken: CancellationToken.None);
             _ = Task.Run(() => bot.GetMe());
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await bot.SetMyCommands(new[]
+                    {
+                        new BotCommand { Command = "status", Description = L10n.T("tg.cmd.status") },
+                        new BotCommand { Command = "last", Description = L10n.T("tg.cmd.last") },
+                        new BotCommand { Command = "stat", Description = L10n.T("tg.cmd.stat") },
+                        new BotCommand { Command = "help", Description = L10n.T("tg.cmd.help") },
+                    });
+                }
+                catch (Exception ex) { Log("app", "", "", "Failed to set bot commands: " + ex.Message); }
+            });
             Log("app", "", "", "Telegram bot polling started");
 
             if (settings.ai != null && !string.IsNullOrEmpty(settings.ai.url) && !string.IsNullOrEmpty(settings.ai.model))
@@ -153,6 +162,57 @@ namespace frte2tg
             finally
             {
                 tgSemaphore.Release();
+            }
+        }
+
+        static string LiveSnapshotDir => appLocation + "/live";
+
+        // Frigate writes {camera}-{id}.jpg to clips only when an event ends, but a review can end while one of its
+        // detections is still going on (e.g. a parked car). For such an event the current best frame is taken from
+        // the Frigate API and saved to LiveSnapshotDir. Returns null while nothing is available yet.
+        static async Task<string> ResolveSnapshotAsync(string camera, string eventId, string type, string logId)
+        {
+            string clip = settings.frigate.clipspath + "/" + camera + "-" + eventId + ".jpg";
+            if (System.IO.File.Exists(clip))
+                return clip;
+
+            // Ended but the file isn't written yet: keep waiting for Frigate's own snapshot.
+            var ev = StatsService.GetEvent(eventId);
+            if (ev != null && ev.end_time != null)
+                return null;
+
+            var bytes = await StatsService.GetFrigateSnapshotAsync(eventId);
+            if (bytes == null)
+                return null;
+
+            Directory.CreateDirectory(LiveSnapshotDir);
+            foreach (var old in Directory.GetFiles(LiveSnapshotDir).Where(f => System.IO.File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddDays(-1)))
+                try { System.IO.File.Delete(old); } catch { }
+
+            string path = LiveSnapshotDir + "/" + camera + "-" + eventId + ".jpg";
+            await System.IO.File.WriteAllBytesAsync(path, bytes);
+            Log(type, logId, camera, "Event " + eventId + " is still in progress, using its current snapshot from Frigate");
+            return path;
+        }
+
+        // Waits (up to options.timeout) until every event has a snapshot; returns event id -> snapshot path for those found.
+        static async Task<Dictionary<string, string>> WaitSnapshotsAsync(string camera, IEnumerable<string> eventIds, string type, string logId)
+        {
+            var ids = eventIds.ToList();
+            var found = new Dictionary<string, string>();
+            int secs = 0;
+            while (true)
+            {
+                foreach (var id in ids.Where(i => !found.ContainsKey(i)).ToList())
+                {
+                    string path = await ResolveSnapshotAsync(camera, id, type, logId);
+                    if (path != null)
+                        found[id] = path;
+                }
+                if (found.Count == ids.Count || secs >= settings.options.timeout)
+                    return found;
+                secs += settings.options.retry;
+                await Task.Delay(settings.options.retry * 1000);
             }
         }
 
@@ -238,46 +298,30 @@ namespace frte2tg
                 List<string> rulabels = new List<string>();
                 if (fr.after.data?.objects != null)
                     foreach (var ob in fr.after.data.objects)
-                        rulabels.Add(rumapobj.TryGetValue(ob.ToLower(), out var label) ? label : "что-то");
+                        rulabels.Add(L10n.Label(ob.ToLower()));
 
                 if (settings.frigate.cameras[cami].snapshot)
                 {
-                    bool allfilesready = true;
-                    int secs = 0;
-                    while (secs <= settings.options.timeout)
-                    {
-                        allfilesready = true;
-                        foreach (var ev in fr.after.data.detections)
-                        {
-                            if (!System.IO.File.Exists(settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg"))
-                                allfilesready = false;
-                        }
-                        if (allfilesready)
-                            break;
-
-                        secs += settings.options.retry;
-                        await Task.Delay(settings.options.retry * 1000);
-                    }
-
-                    if (!allfilesready)
+                    var snaps = await WaitSnapshotsAsync(camera, fr.after.data.detections, "review", fr.after.id);
+                    if (snaps.Count < fr.after.data.detections.Count)
                     {
                         Log("review", fr.after.id, camera, "Error: the snapshot is not ready");
                         return;
                     }
 
-                    string tgcaption = "Обзор: \t" + fr.after.id + "\n" +
-                                       "Камера: " + fr.after.camera + "\n" +
-                                       "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                                       "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                       (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                       "События: " + string.Join(", ", fr.after.data.detections);
+                    string tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
+                                       L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                       L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                       L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                       (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                       L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                     List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
                     int i = 1;
                     foreach (var ev in fr.after.data.detections)
                     {
                         md.Add(new InputMediaPhoto(
-                            new InputFileStream(System.IO.File.OpenRead(settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg"), fr.after.camera + "-" + ev + ".jpg"))
+                            new InputFileStream(System.IO.File.OpenRead(snaps[ev]), fr.after.camera + "-" + ev + ".jpg"))
                         {
                             Caption = (i == 1) ? tgcaption : null,
                             ParseMode = ParseMode.Markdown
@@ -288,9 +332,7 @@ namespace frte2tg
 
                     if (md.Count > 0)
                     {
-                        var imagePaths = fr.after.data.detections
-                            .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
-                            .ToList();
+                        var imagePaths = fr.after.data.detections.Select(ev => snaps[ev]).ToList();
                         string aiPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
 
                         int x = 1;
@@ -344,21 +386,24 @@ namespace frte2tg
                                         Dictionary<string, int> firstmessages,
                                         bool firstmessage,
                                         string tgcaption,
-                                        List<DbRow> dl)
+                                        List<DbRow> dl,
+                                        Dictionary<string, string> snaps)
         {
             var parts = BuildFfmpegParts(fr.after.id, camera, dl);
             int partid = parts.Count;
 
             if (string.IsNullOrEmpty(tgcaption))
-                tgcaption = "Обзор: \t" + fr.after.id + "\n" +
-                            "Камера: " + fr.after.camera + "\n" +
-                            "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                            "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                            (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                            "События: " + string.Join(", ", fr.after.data.detections);
+                tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
+                            L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
+                            L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                            L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                            (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                            L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
+            // Snapshots resolved by the caller (includes current frames of events still in progress), otherwise Frigate's files.
             var imagePaths = fr.after.data.detections
-                .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
+                .Select(ev => snaps.TryGetValue(ev, out var p) ? p : settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
+                .Where(p => System.IO.File.Exists(p))
                 .ToList();
             string aiPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
 
@@ -444,7 +489,7 @@ namespace frte2tg
                         }
                         else
                         {
-                            string cap = fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео";
+                            string cap = fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video");
                             int x = 1;
                             foreach (var chid in settings.telegram.chatids)
                             {
@@ -474,13 +519,13 @@ namespace frte2tg
                         foreach (var chid in settings.telegram.chatids)
                         {
                             string cap = (firstmessages[chid] != -1)
-                                ? fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео"
-                                : fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео\n" +
-                                  "Камера: " + fr.after.camera + "\n" +
-                                  "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                                  "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                  (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                  "События: " + string.Join(", ", fr.after.data.detections);
+                                ? fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video")
+                                : fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video") + "\n" +
+                                  L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                  L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                  L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                  (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                  L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                             await TgCall(() => bot.SendVideo(
@@ -524,38 +569,28 @@ namespace frte2tg
                 List<string> rulabels = new List<string>();
                 if (fr.after.data?.objects != null)
                     foreach (var ob in fr.after.data.objects)
-                        rulabels.Add(rumapobj.TryGetValue(ob.ToLower(), out var label) ? label : "что-то");
+                        rulabels.Add(L10n.Label(ob.ToLower()));
 
                 List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
+                var snaps = new Dictionary<string, string>();
 
                 if (settings.frigate.cameras[cami].snapshot && settings.frigate.cameras[cami].snapshottrigger == "end")
                 {
-                    int secs = 0;
-                    bool allfilesready = false;
-                    while (secs <= settings.options.timeout)
-                    {
-                        allfilesready = fr.after.data.detections
-                            .All(ev => System.IO.File.Exists(settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg"));
-                        if (allfilesready) break;
-                        secs += settings.options.retry;
-                        await Task.Delay(settings.options.retry * 1000);
-                    }
-
-                    if (!allfilesready)
+                    snaps = await WaitSnapshotsAsync(camera, fr.after.data.detections, "review", fr.after.id);
+                    if (snaps.Count < fr.after.data.detections.Count)
                         Log("review", fr.after.id, camera, "Some snapshots not ready after timeout, will skip missing");
 
-                    tgcaption = "Обзор: \t" + fr.after.id + "\n" +
-                                "Камера: " + fr.after.camera + "\n" +
-                                "Объекты: " + string.Join(", ", rulabels) + "\n" +
-                                "Время начала: " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                (fr.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                "События: " + string.Join(", ", fr.after.data.detections);
+                    tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
+                                L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                     int i = 1;
                     foreach (var ev in fr.after.data.detections)
                     {
-                        string snapPath = settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg";
-                        if (!System.IO.File.Exists(snapPath))
+                        if (!snaps.TryGetValue(ev, out string snapPath))
                         {
                             Log("review", fr.after.id, camera, "Snapshot not found, skipping: " + ev);
                             continue;
@@ -588,10 +623,7 @@ namespace frte2tg
                             foreach (var chid in settings.telegram.chatids)
                                 frQueue.AddToQueue(new FRTask
                                 {
-                                    ImagePaths = fr.after.data.detections
-                                        .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
-                                        .Where(p => System.IO.File.Exists(p))
-                                        .ToList(),
+                                    ImagePaths = fr.after.data.detections.Where(snaps.ContainsKey).Select(ev => snaps[ev]).ToList(),
                                     AIPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt,
                                     ChatId = long.Parse(chid),
                                     MessageId = firstmessages[chid],
@@ -603,10 +635,7 @@ namespace frte2tg
                             foreach (var chid in settings.telegram.chatids)
                                 aiQueue.AddToQueue(new AITask
                                 {
-                                    ImagePaths = fr.after.data.detections
-                                        .Select(ev => settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
-                                        .Where(p => System.IO.File.Exists(p))
-                                        .ToList(),
+                                    ImagePaths = fr.after.data.detections.Where(snaps.ContainsKey).Select(ev => snaps[ev]).ToList(),
                                     Prompt = fr.after.data.objects.Contains("person") ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
                                     ChatId = long.Parse(chid),
                                     MessageId = firstmessages[chid],
@@ -661,7 +690,7 @@ namespace frte2tg
                             db.Close();
                             Thread.Sleep(10);
 
-                            await SendReviewMediaAsync(fr, camera, cami, rulabels, md, firstmessages, firstmessage, tgcaption, dl);
+                            await SendReviewMediaAsync(fr, camera, cami, rulabels, md, firstmessages, firstmessage, tgcaption, dl, snaps);
                             break;
                         }
 
@@ -709,7 +738,7 @@ namespace frte2tg
                                 db.Close();
                                 Thread.Sleep(10);
 
-                                await SendReviewMediaAsync(fr, camera, cami, rulabels, md, firstmessages, firstmessage, tgcaption, dl);
+                                await SendReviewMediaAsync(fr, camera, cami, rulabels, md, firstmessages, firstmessage, tgcaption, dl, snaps);
                             }
                         }
                         else
@@ -732,27 +761,13 @@ namespace frte2tg
                 int cami = settings.frigate.cameras.FindIndex(m => m.camera == camera);
                 Log("event", fe.after.id, camera, "Start event new/update worker");
 
-                string rulabel = (rumapobj.TryGetValue(fe.after.label.ToLower(), out var rl) ? rl : "что-то")
+                string rulabel = L10n.Label(fe.after.label.ToLower())
                                + " (" + (fe.after.score * 100).ToString("0.00") + "%)";
 
                 if (fe.after.has_snapshot && settings.frigate.cameras[cami].snapshot)
                 {
-                    bool allfilesready = false;
-                    int secs = 0;
-                    string snapshotPath = settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg";
-
-                    while (secs <= settings.options.timeout)
-                    {
-                        if (System.IO.File.Exists(snapshotPath))
-                        {
-                            allfilesready = true;
-                            break;
-                        }
-                        secs += settings.options.retry;
-                        await Task.Delay(settings.options.retry * 1000);
-                    }
-
-                    if (!allfilesready)
+                    var snaps = await WaitSnapshotsAsync(camera, new[] { fe.after.id }, "event", fe.after.id);
+                    if (!snaps.TryGetValue(fe.after.id, out string snapshotPath))
                     {
                         Log("event", fe.after.id, camera, "Error: the snapshot is not ready");
                         return;
@@ -764,12 +779,12 @@ namespace frte2tg
                     int x = 1;
                     foreach (var chid in settings.telegram.chatids)
                     {
-                        string tgcaption = fe.after.id + " фото\n" +
-                                           "Камера: " + fe.after.camera + "\n" +
-                                           "Объект: " + rulabel + "\n" +
-                                           "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                           (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                           "Событие: " + fe.after.id;
+                        string tgcaption = fe.after.id + " " + L10n.T("caption.photo") + "\n" +
+                                           L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                           L10n.T("caption.object") + " " + rulabel + "\n" +
+                                           L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                           (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                           L10n.T("caption.event") + " " + fe.after.id;
 
                         Message msg = await TgCall(() => bot.SendPhoto(
                             chatId: chid,
@@ -831,11 +846,11 @@ namespace frte2tg
             int partid = parts.Count;
 
             if (string.IsNullOrEmpty(tgcaption))
-                tgcaption = "Событие: \t" + fe.after.id + "\n" +
-                            "Камера: " + fe.after.camera + "\n" +
-                            "Объект: " + rulabel + "\n" +
-                            "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                            (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                tgcaption = L10n.T("caption.event") + " \t" + fe.after.id + "\n" +
+                            L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
+                            L10n.T("caption.object") + " " + rulabel + "\n" +
+                            L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                            (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
             var imagePaths = new List<string> { settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg" };
             string aiPrompt = fe.after.label == "person" ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
@@ -922,7 +937,7 @@ namespace frte2tg
                         }
                         else
                         {
-                            string cap = fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео";
+                            string cap = fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video");
                             int x = 1;
                             foreach (var chid in settings.telegram.chatids)
                             {
@@ -952,12 +967,12 @@ namespace frte2tg
                         foreach (var chid in settings.telegram.chatids)
                         {
                             string cap = (firstmessages[chid] != -1)
-                                ? fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео"
-                                : fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " видео\n" +
-                                  "Камера: " + fe.after.camera + "\n" +
-                                  "Объект: " + rulabel + "\n" +
-                                  "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                  (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                                ? fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video")
+                                : fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video") + "\n" +
+                                  L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                  L10n.T("caption.object") + " " + rulabel + "\n" +
+                                  L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                  (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
                             if (x > 1) Thread.Sleep(settings.telegram.sendchatstimepause * 1000 + 1);
                             await TgCall(() => bot.SendVideo(
@@ -999,7 +1014,7 @@ namespace frte2tg
                 foreach (var chid in settings.telegram.chatids)
                     firstmessages.Add(chid, -1);
 
-                string rulabel = (rumapobj.TryGetValue(fe.after.label.ToLower(), out var rl) ? rl : "что-то")
+                string rulabel = L10n.Label(fe.after.label.ToLower())
                                + " (" + (fe.after.score * 100).ToString("0.00") + "%)";
 
                 List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
@@ -1020,11 +1035,11 @@ namespace frte2tg
                         Log("event", fe.after.id, camera, "Snapshot not ready after timeout, skipping");
                     else
                     {
-                        tgcaption = "Обзор: \t" + fe.after.id + "\n" +
-                                    "Камера: " + fe.after.camera + "\n" +
-                                    "Объект: " + rulabel + "\n" +
-                                    "Время начала: " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                    (fe.after.end_time.HasValue ? "Время окончания: " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                        tgcaption = L10n.T("caption.review") + " \t" + fe.after.id + "\n" +
+                                    L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                    L10n.T("caption.object") + " " + rulabel + "\n" +
+                                    L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                    (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
                         md.Add(new InputMediaPhoto(
                             new InputFileStream(System.IO.File.OpenRead(snapPath), fe.after.camera + "-" + fe.after.id + ".jpg"))
@@ -1386,6 +1401,12 @@ namespace frte2tg
 
         async static Task TgHandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
+            if (update.CallbackQuery is { } callback)
+            {
+                await TgHandleCallbackAsync(botClient, callback, cancellationToken);
+                return;
+            }
+
             if (update.Message is not { } message)
                 return;
             if (message.Text is not { } messageText)
@@ -1396,21 +1417,35 @@ namespace frte2tg
             if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
             {
                 Log("tg", "", message.From.Id.ToString(), "Unauthorized access attempt from " + message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"));
-                await TgCall(() => botClient.SendMessage(chatId: message.Chat.Id, text: "go away!", cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
+                await TgCall(() => botClient.SendMessage(chatId: message.Chat.Id, text: L10n.T("tg.unauthorized"), cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
                 return;
             }
 
-            if (messageText.ToLower().Contains("/private") || messageText.ToLower().Contains("/help"))
+            string[] tokens = messageText.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0)
+                return;
+            string command = tokens[0].ToLower();
+            if (command.Contains('@'))
+                command = command.Substring(0, command.IndexOf('@'));
+            string[] args = tokens.Skip(1).ToArray();
+            string who = message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")");
+
+            if (command == "/last")
+            {
+                Log("tg", who, message.Chat.Id.ToString(), "Sending last");
+                await TgSendLast(botClient, message.Chat.Id, args, cancellationToken);
+            }
+
+            if (command == "/stat")
+            {
+                Log("tg", who, message.Chat.Id.ToString(), "Sending stat");
+                await TgSendStat(botClient, message.Chat.Id, null, args, cancellationToken);
+            }
+
+            if (command == "/private" || command == "/help" || command == "/start")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending help");
-                string helpText =
-                    "*frte2tg* — Frigate NVR → Telegram bridge\n\n" +
-                    "Подписывается на MQTT события Frigate и отправляет снапшоты, видеоклипы и GIF-превью в Telegram\\.\n\n" +
-                    "*Команды:*\n" +
-                    "/status — текущая обстановка с камер\n" +
-                    "/help — эта справка\n\n" +
-                    "*Проект:* [github.com/rsvln/frte2tg](https://github.com/rsvln/frte2tg)\n\n" +
-                    "*Лицензия:* MIT";
+                string helpText = L10n.T("tg.help");
                 await TgCall(() => botClient.SendMessage(
                     chatId: message.Chat.Id,
                     text: helpText,
@@ -1419,7 +1454,7 @@ namespace frte2tg
                     "tg", "", message.Chat.Id.ToString());
             }
 
-            if (messageText.ToLower().Contains("/status"))
+            if (command == "/status")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending status");
                 SqliteConnection db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
@@ -1438,7 +1473,7 @@ namespace frte2tg
                         md.Add(new InputMediaPhoto(
                             new InputFileStream(System.IO.File.OpenRead(localPath), dr["camera"].ToString() + "_" + rnd + ".jpg"))
                         {
-                            Caption = ((i == 1) || (i % 11 == 0)) ? "Текущая обстановка" : null
+                            Caption = ((i == 1) || (i % 11 == 0)) ? L10n.T("tg.status.caption") : null
                         });
 
                         if (i % 10 == 0)
@@ -1461,6 +1496,256 @@ namespace frte2tg
                     Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Status sent");
                 }
             }
+        }
+
+        public static Dictionary<string, string> emojiobj = new Dictionary<string, string>()
+                                                    {
+                                                        { "car", "🚗" },
+                                                        { "person", "👤" },
+                                                        { "dog", "🐕" },
+                                                        { "cat", "🐈" },
+                                                        { "bird", "🐦" }
+                                                    };
+
+        static string EmojiLabel(string label) => emojiobj.TryGetValue(label, out var em) ? em : "•";
+
+        static async Task TgHandleCallbackAsync(ITelegramBotClient botClient, CallbackQuery callback, CancellationToken cancellationToken)
+        {
+            if (callback.Message == null || callback.Data == null)
+                return;
+            long chatId = callback.Message.Chat.Id;
+            string who = callback.From.Id + (string.IsNullOrEmpty(callback.From.Username) ? "" : " (@" + callback.From.Username + ")");
+
+            if (!settings.telegram.chatids.Contains(chatId.ToString()))
+            {
+                Log("tg", who, chatId.ToString(), "Unauthorized callback from " + who);
+                return;
+            }
+
+            Log("tg", who, chatId.ToString(), "Received callback: " + callback.Data);
+            try { await botClient.AnswerCallbackQuery(callback.Id, cancellationToken: cancellationToken); }
+            catch (ApiRequestException) { }
+
+            // last|<camera or label>   stat|<period>|<camera>|<label>
+            string[] parts = callback.Data.Split('|');
+            if (parts[0] == "last" && parts.Length == 2)
+                await TgSendLast(botClient, chatId, new[] { parts[1] }, cancellationToken);
+            else if (parts[0] == "stat" && parts.Length == 4)
+                await TgSendStat(botClient, chatId, callback.Message.Id,
+                                 new[] { parts[1], parts[2], parts[3] }.Where(s => s.Length > 0).ToArray(), cancellationToken);
+        }
+
+        static async Task TgSendLast(ITelegramBotClient botClient, long chatId, string[] args, CancellationToken cancellationToken)
+        {
+            try
+            {
+                CommandFilter f = StatsService.ParseArgs(args);
+                if (f.unknown.Count > 0)
+                {
+                    await TgSendUnknown(botClient, chatId, f.unknown, cancellationToken);
+                    return;
+                }
+
+                // No camera given: last N events of every camera (N defaults to 1). Camera given: last N of that camera (N defaults to 5).
+                bool overview = f.camera == null && f.label == null && f.limit == null;
+                bool perCamera = f.camera == null;
+                int limit = Math.Clamp(f.limit ?? (perCamera ? 1 : 5), 1, settings.telegram.mediagrouplimit);
+                List<EventRow> rows = perCamera ? StatsService.GetLastPerCamera(limit, f.label) : StatsService.GetLast(f.camera, f.label, limit);
+
+                if (rows.Count == 0)
+                    await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.last.none"), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+
+                var snaps = new List<(EventRow row, byte[] jpg)>();
+                foreach (var r in rows)
+                    snaps.Add((r, await StatsService.GetSnapshotAsync(r)));
+                var withoutSnap = snaps.Where(s => s.jpg == null).Select(s => s.row).ToList();
+
+                // One album per camera when several events per camera were asked for, otherwise one shared album.
+                string filterTitle = f.label != null ? " · " + EmojiLabel(f.label) + " " + WebUtility.HtmlEncode(L10n.Label(f.label)) : "";
+                var groups = perCamera && limit > 1
+                    ? snaps.Where(s => s.jpg != null).GroupBy(s => s.row.camera)
+                           .Select(g => (title: "<b>📷 " + WebUtility.HtmlEncode(g.Key) + "</b>" + filterTitle, items: g.ToList()))
+                    : new[] { (title: (perCamera ? "<b>" + L10n.T("tg.last.title_all") + "</b>" : "<b>📷 " + WebUtility.HtmlEncode(f.camera) + "</b>") + filterTitle,
+                                items: snaps.Where(s => s.jpg != null).ToList()) };
+
+                foreach (var (title, items) in groups)
+                foreach (var chunkSnaps in items.Chunk(settings.telegram.mediagrouplimit))
+                {
+                    var chunk = chunkSnaps.Select(s => s.row).ToArray();
+                    // Telegram shows an album caption only when a single item has one, so all events are listed on the first photo.
+                    string caption = title + "\n" +
+                                     string.Join("\n", chunk.Select((r, i) => (i + 1) + ". " + FormatEventLine(r)));
+                    var streams = chunkSnaps.Select(s => (Stream)new MemoryStream(s.jpg)).ToList();
+                    try
+                    {
+                        if (chunk.Length == 1)
+                            await TgCall(() => botClient.SendPhoto(chatId, new InputFileStream(streams[0], chunk[0].camera + "-" + chunk[0].id + ".jpg"),
+                                                                    caption: caption, parseMode: ParseMode.Html, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                        else
+                        {
+                            var md = chunk.Select((r, i) => (IAlbumInputMedia)new InputMediaPhoto(new InputFileStream(streams[i], r.camera + "-" + r.id + ".jpg"))
+                            {
+                                Caption = i == 0 ? caption : null,
+                                ParseMode = ParseMode.Html
+                            }).ToList();
+                            await TgCall(() => botClient.SendMediaGroup(chatId, md, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                        }
+                    }
+                    finally
+                    {
+                        streams.ForEach(s => s.Dispose());
+                    }
+                }
+
+                if (withoutSnap.Count > 0)
+                {
+                    string text = "<b>" + L10n.T("tg.last.no_snapshot") + "</b>\n" + string.Join("\n", withoutSnap.Select(FormatEventLine));
+                    await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                }
+
+                if (overview)
+                {
+                    MetaResult meta = StatsService.GetMeta();
+                    var buttons = new[] { 3, 5 }.Select(n => (text: L10n.T("tg.last.per_camera", n), data: CallbackData("last|" + n)))
+                                  .Concat(meta.cameras.Select(c => (text: "📷 " + c, data: CallbackData("last|" + c))))
+                                  .Concat(meta.labels.Select(l => (text: EmojiLabel(l) + " " + L10n.Label(l), data: CallbackData("last|" + l))))
+                                  .Where(b => b.data != null)
+                                  .Select(b => InlineKeyboardButton.WithCallbackData(b.text, b.data))
+                                  .Chunk(3);
+                    await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.last.pick"),
+                                                             replyMarkup: new InlineKeyboardMarkup(buttons), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("tg", "", chatId.ToString(), "Error: /last failed: " + ex.Message);
+                await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+            }
+        }
+
+        // Sends the stats message, or edits `editMessageId` in place when a period button was pressed.
+        static async Task TgSendStat(ITelegramBotClient botClient, long chatId, int? editMessageId, string[] args, CancellationToken cancellationToken)
+        {
+            try
+            {
+                CommandFilter f = StatsService.ParseArgs(args);
+                if (f.unknown.Count > 0)
+                {
+                    await TgSendUnknown(botClient, chatId, f.unknown, cancellationToken);
+                    return;
+                }
+
+                StatsResult st = StatsService.GetStats(f.period, f.camera, f.label);
+                string text = FormatStat(st);
+
+                string suffix = "|" + (f.camera ?? "") + "|" + (f.label ?? "");
+                var periods = new[] { "24h", "today", "7d", "30d" }.Select(p => (L10n.T("tg.stat.btn." + p), p));
+                var keyboard = new InlineKeyboardMarkup(periods
+                    .Select(p => InlineKeyboardButton.WithCallbackData(p.Item1, CallbackData("stat|" + p.Item2 + suffix) ?? "stat|" + p.Item2 + "||")));
+
+                if (editMessageId.HasValue)
+                {
+                    try
+                    {
+                        await TgCall(() => botClient.EditMessageText(chatId, editMessageId.Value, text, parseMode: ParseMode.Html,
+                                                                     replyMarkup: keyboard, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                    }
+                    catch (ApiRequestException ex) when (ex.Message.Contains("not modified")) { }
+                }
+                else
+                    await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html,
+                                                             replyMarkup: keyboard, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+            }
+            catch (Exception ex)
+            {
+                Log("tg", "", chatId.ToString(), "Error: /stat failed: " + ex.Message);
+                await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+            }
+        }
+
+        static async Task TgSendUnknown(ITelegramBotClient botClient, long chatId, List<string> unknown, CancellationToken cancellationToken)
+        {
+            MetaResult meta = StatsService.GetMeta();
+            string text = L10n.T("tg.unknown", WebUtility.HtmlEncode(string.Join(", ", unknown))) + "\n\n" +
+                          "<b>" + L10n.T("tg.unknown.cameras") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.cameras)) + "\n" +
+                          "<b>" + L10n.T("tg.unknown.objects") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.labels)) + "\n" +
+                          "<b>" + L10n.T("tg.unknown.periods") + "</b> 24h, 7d, 30d, today";
+            await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+        }
+
+        // Telegram limits callback data to 64 bytes.
+        static string CallbackData(string data) => Encoding.UTF8.GetByteCount(data) <= 64 ? data : null;
+
+        // Time only for today, date + time otherwise.
+        static string FormatShortTime(double unix, string todayFormat)
+        {
+            DateTime t = StatsService.ToLocal(unix);
+            return t.Date == DateTime.UtcNow.AddMinutes(settings.options.timeoffset).Date ? t.ToString(todayFormat) : t.ToString("dd.MM HH:mm");
+        }
+
+        static string FormatEventLine(EventRow r)
+        {
+            string time = FormatShortTime(r.start_time, "HH:mm:ss");
+            return WebUtility.HtmlEncode(r.camera) + " · " + EmojiLabel(r.label) + " " + WebUtility.HtmlEncode(L10n.Label(r.label)) +
+                   (r.sub_label != null ? " (" + WebUtility.HtmlEncode(r.sub_label) + ")" : "") +
+                   " · " + Math.Round(r.score * 100) + "% · " + time + (r.end_time == null ? " · ⏳ " + L10n.T("tg.last.in_progress") : "") +
+                   (r.zones.Count > 0 ? " · " + WebUtility.HtmlEncode(string.Join(", ", r.zones)) : "");
+        }
+
+        static string Sparkline(IEnumerable<int> values)
+        {
+            const string bars = "▁▂▃▄▅▆▇█";
+            var list = values.ToList();
+            int max = list.DefaultIfEmpty(0).Max();
+            return new string(list.Select(v => v == 0 ? ' ' : bars[Math.Min(bars.Length - 1, (int)Math.Ceiling((double)v / max * bars.Length) - 1)]).ToArray());
+        }
+
+        static string FormatStat(StatsResult st)
+        {
+            var sb = new StringBuilder();
+            sb.Append("<b>").Append(L10n.T("tg.stat.title", st.period)).Append("</b>");
+            if (st.camera != null) sb.Append(" · 📷 ").Append(WebUtility.HtmlEncode(st.camera));
+            if (st.label != null) sb.Append(" · ").Append(EmojiLabel(st.label)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Label(st.label)));
+            sb.Append('\n');
+            sb.Append(L10n.T("tg.stat.summary", st.total, st.alerts, st.detections)).Append('\n');
+
+            if (st.total == 0)
+                return sb.Append("\n" + L10n.T("tg.stat.empty")).ToString();
+
+            sb.Append("\n<b>" + L10n.T("tg.stat.by_object") + "</b>\n<pre>");
+            int lw = st.labels.Max(l => L10n.Label(l).Length);
+            foreach (var l in st.labels)
+                sb.Append(EmojiLabel(l)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Label(l).PadRight(lw))).Append(' ').Append(st.labelTotals[l].ToString().PadLeft(5)).Append('\n');
+            sb.Append("</pre>");
+
+            if (st.camera == null)
+            {
+                sb.Append("\n<b>" + L10n.T("tg.stat.by_camera") + "</b>\n<pre>");
+                int cw = st.cameras.Max(c => c.Length);
+                foreach (var c in st.cameras)
+                {
+                    var row = st.matrix[c];
+                    sb.Append(WebUtility.HtmlEncode(c.PadRight(cw))).Append(' ').Append(row.Values.Sum().ToString().PadLeft(5)).Append("  ")
+                      .Append(string.Join(" ", row.OrderByDescending(kv => kv.Value).Select(kv => EmojiLabel(kv.Key) + kv.Value)));
+                    if (st.lastByCamera.TryGetValue(c, out double last))
+                        sb.Append("  ⏱").Append(FormatShortTime(last, "HH:mm"));
+                    sb.Append('\n');
+                }
+                sb.Append("</pre>");
+            }
+            else if (st.lastByCamera.TryGetValue(st.camera, out double last))
+                sb.Append(L10n.T("tg.stat.last_event", FormatShortTime(last, "HH:mm:ss"))).Append('\n');
+
+            sb.Append("\n<b>" + L10n.T("tg.stat.by_hour") + "</b> · " + L10n.T("tg.stat.peak") + " ").Append(st.peakHour.ToString("00")).Append(":00–").Append(((st.peakHour + 1) % 24).ToString("00")).Append(":00\n");
+            sb.Append("<pre>").Append(Sparkline(st.hours)).Append("\n0     6     12    18   23</pre>");
+
+            if (st.days.Count > 2)
+            {
+                sb.Append("\n<b>" + L10n.T("tg.stat.by_day") + "</b> · ").Append(DateTime.Parse(st.days[0].day).ToString("dd.MM")).Append(" – ")
+                  .Append(DateTime.Parse(st.days[^1].day).ToString("dd.MM")).Append('\n');
+                sb.Append("<pre>").Append(Sparkline(st.days.Select(d => d.count))).Append("</pre>");
+            }
+            return sb.ToString();
         }
 
         static Task TgHandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)

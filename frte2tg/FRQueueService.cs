@@ -131,7 +131,7 @@ namespace frte2tg
                 {
                     string enrichedPrompt = task.AIPrompt;
                     if (allNames.Count > 0)
-                        enrichedPrompt = $"На фото: {string.Join(", ", allNames)}. " + task.AIPrompt;
+                        enrichedPrompt = L10n.T("fr.prompt_names", string.Join(", ", allNames)) + task.AIPrompt;
 
                     Program.aiQueue.AddToQueue(new AITask
                     {

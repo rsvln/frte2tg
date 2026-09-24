@@ -143,6 +143,7 @@ namespace frte2tg
         public int retry { get; set; } = 10;
         public bool sendeverythingwhatyouhave { get; set; } = true;
         public int gifwidth { get; set; } = 640;     
+        public string locale { get; set; } = "en";
     }
 
     public class LoggerSettings
@@ -287,6 +288,62 @@ namespace frte2tg
     {
         public string content { get; set; }
         public string thinking { get; set; }
+    }
+
+    public class EventRow
+    {
+        public string id { get; set; }
+        public string camera { get; set; }
+        public string label { get; set; }
+        public string sub_label { get; set; }
+        public double score { get; set; }
+        public double start_time { get; set; }
+        public double? end_time { get; set; }
+        public List<string> zones { get; set; } = new List<string>();
+        public bool has_snapshot { get; set; }
+        public bool has_clip { get; set; }
+    }
+
+    public class MetaResult
+    {
+        public List<string> cameras { get; set; } = new List<string>();
+        public List<string> labels { get; set; } = new List<string>();
+    }
+
+    public class CommandFilter
+    {
+        public string camera { get; set; }
+        public string label { get; set; }
+        public int? limit { get; set; }
+        public string period { get; set; }
+        public List<string> unknown { get; set; } = new List<string>();
+    }
+
+    public class DayCount
+    {
+        public string day { get; set; }
+        public int count { get; set; }
+    }
+
+    public class StatsResult
+    {
+        public string period { get; set; }
+        public double from { get; set; }
+        public double to { get; set; }
+        public string camera { get; set; }
+        public string label { get; set; }
+        public bool configOnly { get; set; }
+        public int total { get; set; }
+        public int alerts { get; set; }
+        public int detections { get; set; }
+        public int peakHour { get; set; }
+        public List<string> cameras { get; set; } = new List<string>();
+        public List<string> labels { get; set; } = new List<string>();
+        public Dictionary<string, int> labelTotals { get; set; } = new Dictionary<string, int>();
+        public Dictionary<string, Dictionary<string, int>> matrix { get; set; } = new Dictionary<string, Dictionary<string, int>>();
+        public int[] hours { get; set; } = new int[24];
+        public List<DayCount> days { get; set; } = new List<DayCount>();
+        public Dictionary<string, double> lastByCamera { get; set; } = new Dictionary<string, double>();
     }
 
 

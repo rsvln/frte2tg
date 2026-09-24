@@ -11,6 +11,7 @@ WORKDIR /app
 RUN apk add --no-cache ffmpeg curl wget
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+#FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["frte2tg/frte2tg.csproj", "frte2tg/"]
