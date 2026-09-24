@@ -95,6 +95,13 @@ namespace frte2tg
                     catch (Exception ex) { return Results.Problem(ex.Message); }
                 });
 
+                // YAML editor for the Config tab, bundled from webui/ (npm run build), served locally so no internet is needed.
+                app.MapGet("/js/yaml-editor.js", () =>
+                {
+                    string path = Path.Combine(Program.appLocation, "web", "yaml-editor.js");
+                    return File.Exists(path) ? Results.File(path, "text/javascript") : Results.NotFound();
+                });
+
                 // Version and the README rendered to HTML for the About tab.
                 app.MapGet("/api/about", () => Safe(() =>
                 {
@@ -397,6 +404,8 @@ namespace frte2tg
 
               .config-hint { color: var(--muted); font-size: 12px; margin-left: auto; }
 
+              #config-editor-host { flex: 1; min-height: 0; overflow: hidden; }
+
               #config-editor {
                 flex: 1;
                 background: var(--bg);
@@ -679,6 +688,7 @@ namespace frte2tg
                   <button class="btn primary" onclick="saveConfig(true)">{{web.config.save_apply}}</button>
                   <span class="config-hint">{{web.config.hint}}</span>
                 </div>
+                <div id="config-editor-host" style="display:none"></div>
                 <textarea id="config-editor" spellcheck="false"></textarea>
               </div>
 
@@ -1056,10 +1066,29 @@ namespace frte2tg
               return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             }
 
+            // Config editor: CodeMirror from /js/yaml-editor.js, or the plain text area if it cannot be loaded.
+            let configEditor = null;
+            function getConfigEditor() {
+              return configEditor ??= (async () => {
+                const area = document.getElementById('config-editor');
+                try {
+                  const { createYamlEditor } = await import('/js/yaml-editor.js?v=%VERSION%');
+                  const host = document.getElementById('config-editor-host');
+                  const editor = createYamlEditor(host, area.value);
+                  area.style.display = 'none';
+                  host.style.display = '';
+                  return editor;
+                } catch (e) {
+                  console.warn('YAML editor is not available, using the plain text area', e);
+                  return { getValue: () => area.value, setValue: v => { area.value = v; }, focus: () => area.focus() };
+                }
+              })();
+            }
+
             async function loadConfig() {
               const res = await fetch('/api/config');
               const data = await res.json();
-              document.getElementById('config-editor').value = data.content;
+              (await getConfigEditor()).setValue(data.content);
             }
 
             function setBusy(text) {
@@ -1093,7 +1122,7 @@ namespace frte2tg
             }
 
             async function saveConfig(apply) {
-              const content = document.getElementById('config-editor').value;
+              const content = (await getConfigEditor()).getValue();
               setBusy(apply ? t('web.config.applying') : t('web.config.saving'));
               try {
                 if (!await configRequest('/api/config', { content, apply })) return;
