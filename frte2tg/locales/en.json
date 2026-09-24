@@ -113,8 +113,14 @@
   "web.by_hour": "By hour of day",
   "web.by_day": "By day",
   "web.config.save": "Save",
-  "web.config.reload": "Reload",
-  "web.config.hint": "Backup (.bak) created automatically on save",
-  "web.config.saved": "Saved",
-  "web.config.error": "Error"
+  "web.config.apply": "Apply",
+  "web.config.save_apply": "Save & apply",
+  "web.config.saving": "Saving…",
+  "web.config.applying": "Applying settings…",
+  "web.config.waiting": "Waiting for the service to reconnect…",
+  "web.config.saved": "Saved. Press Apply to use the new settings",
+  "web.config.applied": "Settings applied",
+  "web.config.applied_nomqtt": "Settings applied, but MQTT is not connected — see the log",
+  "web.config.invalid": "Error: {0}",
+  "web.config.hint": "Backup (.bak) created automatically on save"
 }

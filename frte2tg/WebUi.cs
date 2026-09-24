@@ -112,39 +112,89 @@ namespace frte2tg
                     return Results.Ok(new { content = File.ReadAllText(configPath) });
                 });
 
+                // Saves the config (after checking that it parses); with "apply": true also applies it.
                 app.MapPost("/api/config", async (HttpRequest req) =>
                 {
                     using var reader = new StreamReader(req.Body);
-                    var body = await reader.ReadToEndAsync();
-                    var data = System.Text.Json.JsonSerializer.Deserialize<ConfigPayload>(body);
+                    var data = System.Text.Json.JsonSerializer.Deserialize<ConfigPayload>(await reader.ReadToEndAsync());
                     if (data?.content == null)
                         return Results.BadRequest();
-                    if (File.Exists(configPath))
-                        File.Copy(configPath, configPath + ".bak", overwrite: true);
-                    File.WriteAllText(configPath, data.content);
-
                     try
                     {
-                        Program.settings = (new DeserializerBuilder()
-                            .WithNamingConvention(UnderscoredNamingConvention.Instance)
-                            .Build())
-                            .Deserialize<SettingsFile>(File.ReadAllText(configPath));
-                        await Program.Initialize();
-                        Program.Log("app", "", "", "Settings reloaded");
+                        ParseSettings(data.content);
+                    }
+                    catch (YamlDotNet.Core.YamlException ex)
+                    {
+                        // The innermost message names the actual problem; the outer ones only wrap it.
+                        var inner = ex;
+                        while (inner.InnerException is YamlDotNet.Core.YamlException next)
+                            inner = next;
+                        string message = inner.InnerException?.Message ?? inner.Message;
+                        if (message.StartsWith("No node deserializer"))
+                            message = "unexpected value (wrong type or indentation)";
+                        return Results.BadRequest(new { ok = false, error = $"line {inner.Start.Line}, column {inner.Start.Column}: {message}" });
                     }
                     catch (Exception ex)
                     {
-                        Program.Log("app", "", "", "Failed to reload settings: " + ex.Message);
+                        return Results.BadRequest(new { ok = false, error = ex.Message });
                     }
 
-                    return Results.Ok(new { ok = true });
+                    if (File.Exists(configPath))
+                        File.Copy(configPath, configPath + ".bak", overwrite: true);
+                    File.WriteAllText(configPath, data.content);
+                    Program.Log("app", "", "", "Settings saved");
+                    return data.apply ? await ApplyAsync(configPath) : Results.Ok(new { ok = true });
                 });
+
+                // Re-reads the saved config file and restarts the services with it.
+                app.MapPost("/api/apply", () => ApplyAsync(configPath));
+
+                // Polled by the page after applying settings, until MQTT is connected again.
+                app.MapGet("/api/status", () => Results.Ok(new { version = VersionInfo.Version, mqtt = Program.mqttClient?.IsConnected == true }));
 
                 app.Run();
             });
         }
 
-        record ConfigPayload(string content);
+        record ConfigPayload(string content, bool apply);
+
+        static readonly SemaphoreSlim applyLock = new SemaphoreSlim(1, 1);
+
+        // Parses the YAML and checks the sections the app cannot run without.
+        static SettingsFile ParseSettings(string yaml)
+        {
+            var s = new DeserializerBuilder()
+                .WithNamingConvention(UnderscoredNamingConvention.Instance)
+                .Build()
+                .Deserialize<SettingsFile>(yaml);
+            var missing = new[] { ("frigate", (object)s?.frigate), ("mqtt", s?.mqtt), ("telegram", s?.telegram), ("options", s?.options), ("logger", s?.logger) }
+                .Where(x => x.Item2 == null).Select(x => x.Item1).ToList();
+            if (missing.Count > 0)
+                throw new InvalidDataException("missing section: " + string.Join(", ", missing));
+            return s;
+        }
+
+        // Loads the config file and restarts Telegram polling, MQTT and the AI/FR queues (Program.Initialize).
+        static async Task<IResult> ApplyAsync(string configPath)
+        {
+            await applyLock.WaitAsync();
+            try
+            {
+                Program.settings = ParseSettings(File.ReadAllText(configPath));
+                await Program.Initialize();
+                Program.Log("app", "", "", "Settings applied");
+                return Results.Ok(new { ok = true });
+            }
+            catch (Exception ex)
+            {
+                Program.Log("app", "", "", "Failed to apply settings: " + ex.Message);
+                return Results.Json(new { ok = false, error = ex.Message }, statusCode: 500);
+            }
+            finally
+            {
+                applyLock.Release();
+            }
+        }
 
         // Fills {{key}} placeholders in the page and hands web./label. strings to its scripts as I18N.
         static string Localize(string html)
@@ -483,6 +533,20 @@ namespace frte2tg
               .markdown th, .markdown td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
               .markdown th { background: var(--bg2); }
 
+              .busy {
+                position: fixed; inset: 0; z-index: 20;
+                background: rgba(13, 17, 23, 0.75);
+                display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+                color: var(--text); font-size: 14px;
+              }
+              .busy.show { display: flex; }
+              .spinner {
+                width: 36px; height: 36px; border-radius: 50%;
+                border: 3px solid var(--border); border-top-color: var(--accent);
+                animation: spin 0.8s linear infinite;
+              }
+              @keyframes spin { to { transform: rotate(360deg); } }
+
               .toast {
                 position: fixed;
                 bottom: 24px;
@@ -605,8 +669,9 @@ namespace frte2tg
 
               <div class="panel" id="panel-config">
                 <div class="config-toolbar">
-                  <button class="btn primary" onclick="saveConfig()">{{web.config.save}}</button>
-                  <button class="btn" onclick="loadConfig()">{{web.config.reload}}</button>
+                  <button class="btn" onclick="saveConfig(false)">{{web.config.save}}</button>
+                  <button class="btn" onclick="applyConfig()">{{web.config.apply}}</button>
+                  <button class="btn primary" onclick="saveConfig(true)">{{web.config.save_apply}}</button>
                   <span class="config-hint">{{web.config.hint}}</span>
                 </div>
                 <textarea id="config-editor" spellcheck="false"></textarea>
@@ -637,6 +702,7 @@ namespace frte2tg
             </footer>
 
             <div class="toast" id="toast"></div>
+            <div class="busy" id="busy"><div class="spinner"></div><div id="busy-text"></div></div>
             <div class="lightbox" id="lightbox" onclick="closeLightbox(event)"><img id="lightbox-img" alt=""><video id="lightbox-video" controls playsinline></video></div>
 
             <script>
@@ -987,22 +1053,65 @@ namespace frte2tg
               document.getElementById('config-editor').value = data.content;
             }
 
-            async function saveConfig() {
+            function setBusy(text) {
+              document.getElementById('busy-text').textContent = text || '';
+              document.getElementById('busy').classList.toggle('show', !!text);
+            }
+
+            // Sends a config request; returns true on success, shows the server's error otherwise.
+            async function configRequest(url, body) {
+              try {
+                const res = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: body ? JSON.stringify(body) : null });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.ok) return true;
+                showToast(t('web.config.invalid', data.error || res.status), 'err');
+              } catch (e) {
+                showToast(t('web.config.invalid', e.message), 'err');
+              }
+              return false;
+            }
+
+            // After applying, waits until the service is back on MQTT (up to 20 s).
+            async function waitForService() {
+              for (let i = 0; i < 20; i++) {
+                try {
+                  const res = await fetch('/api/status');
+                  if (res.ok && (await res.json()).mqtt) { showToast(t('web.config.applied'), 'ok'); return; }
+                } catch { }
+                await new Promise(r => setTimeout(r, 1000));
+              }
+              showToast(t('web.config.applied_nomqtt'), 'err');
+            }
+
+            async function saveConfig(apply) {
               const content = document.getElementById('config-editor').value;
-              const res = await fetch('/api/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ content })
-              });
-              const data = await res.json();
-              showToast(data.ok ? t('web.config.saved') : t('web.config.error'), data.ok ? 'ok' : 'err');
+              setBusy(apply ? t('web.config.applying') : t('web.config.saving'));
+              try {
+                if (!await configRequest('/api/config', { content, apply })) return;
+                if (apply) { setBusy(t('web.config.waiting')); await waitForService(); }
+                else showToast(t('web.config.saved'), 'ok');
+              } finally {
+                setBusy(null);
+              }
+            }
+
+            async function applyConfig() {
+              setBusy(t('web.config.applying'));
+              try {
+                if (!await configRequest('/api/apply')) return;
+                setBusy(t('web.config.waiting'));
+                await waitForService();
+              } finally {
+                setBusy(null);
+              }
             }
 
             function showToast(msg, type) {
-              const t = document.getElementById('toast');
-              t.textContent = msg;
-              t.className = 'toast ' + type + ' show';
-              setTimeout(() => t.classList.remove('show'), 2500);
+              const el = document.getElementById('toast');
+              el.textContent = msg;
+              el.className = 'toast ' + type + ' show';
+              clearTimeout(showToast.timer);
+              showToast.timer = setTimeout(() => el.classList.remove('show'), type === 'err' ? 6000 : 3000);
             }
 
 

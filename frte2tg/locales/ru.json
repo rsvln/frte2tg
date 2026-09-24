@@ -113,8 +113,14 @@
   "web.by_hour": "По часам суток",
   "web.by_day": "По дням",
   "web.config.save": "Сохранить",
-  "web.config.reload": "Перечитать",
-  "web.config.hint": "При сохранении автоматически создаётся резервная копия (.bak)",
-  "web.config.saved": "Сохранено",
-  "web.config.error": "Ошибка"
+  "web.config.apply": "Применить",
+  "web.config.save_apply": "Сохранить и применить",
+  "web.config.saving": "Сохраняю…",
+  "web.config.applying": "Применяю настройки…",
+  "web.config.waiting": "Жду переподключения сервиса…",
+  "web.config.saved": "Сохранено. Нажмите «Применить», чтобы включить новые настройки",
+  "web.config.applied": "Настройки применены",
+  "web.config.applied_nomqtt": "Настройки применены, но MQTT не подключился — смотрите лог",
+  "web.config.invalid": "Ошибка: {0}",
+  "web.config.hint": "При сохранении автоматически создаётся резервная копия (.bak)"
 }
