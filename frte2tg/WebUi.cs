@@ -470,8 +470,13 @@ namespace frte2tg
                 font-family: 'IBM Plex Sans', sans-serif;
                 cursor: pointer;
                 text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                line-height: 18px;
               }
               .card .act:hover { border-color: var(--accent); color: var(--accent); }
+              .card .act svg { width: 14px; height: 14px; flex-shrink: 0; }
 
               .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
               .kpi { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
@@ -841,6 +846,10 @@ namespace frte2tg
               }
             }
 
+            // Inline icons, drawn in the button's text color.
+            const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>';
+            const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 15v5h16v-5"/></svg>';
+
             function eventCard(r) {
               return `
                 <div class="card">
@@ -854,8 +863,8 @@ namespace frte2tg
                       <span class="when" title="${esc(r.start_local)}">${esc(r.start_local.slice(5, 16))} · ${ago(r.start_time)}</span></div>
                     ${r.zones.length ? `<div class="zones">${esc(r.zones.join(', '))}</div>` : ''}
                     <div class="actions">
-                      <button class="act" data-id="${esc(r.id)}" onclick="openVideo(this.dataset.id)">▶ ${esc(t('web.video'))}</button>
-                      <a class="act" href="/api/clip/${encodeURIComponent(r.id)}?download=1" title="${esc(t('web.download'))}">⬇</a>
+                      <button class="act" data-id="${esc(r.id)}" onclick="openVideo(this.dataset.id)">${ICON_PLAY} ${esc(t('web.video'))}</button>
+                      <a class="act" href="/api/clip/${encodeURIComponent(r.id)}?download=1" title="${esc(t('web.download'))}">${ICON_DOWNLOAD}</a>
                     </div>
                   </div>
                 </div>`;
