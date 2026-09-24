@@ -677,6 +677,7 @@ namespace frte2tg
                   <label>{{web.object}}</label>
                   <select id="stat-label" class="meta-label" onchange="loadStats()"><option value="config">{{web.filter_config}}</option><option value="">{{web.all}}</option></select>
                   <button class="btn" onclick="loadStats()">{{web.refresh}}</button>
+                  <button class="btn" id="stat-back" onclick="statBack()" style="display:none">← {{web.back}}</button>
                 </div>
                 <div class="scroll" id="stats-body"></div>
               </div>
@@ -937,7 +938,31 @@ namespace frte2tg
               loadStats();
             }
 
+            // Filter history for the "Back" button: every change of period, camera or object is a step.
+            const statHistory = [];
+            let statShown = null;
+
+            function statFilter() {
+              return ['stat-period', 'stat-camera', 'stat-label'].map(id => document.getElementById(id).value);
+            }
+
+            async function statBack() {
+              const prev = statHistory.pop();
+              if (!prev) return;
+              ['stat-period', 'stat-camera', 'stat-label'].forEach((id, i) => document.getElementById(id).value = prev[i]);
+              statShown = prev;
+              saveState();
+              await loadStats();
+            }
+
             async function loadStats() {
+              const current = statFilter();
+              if (statShown && current.join('|') !== statShown.join('|')) {
+                statHistory.push(statShown);
+                if (statHistory.length > 30) statHistory.shift();
+              }
+              statShown = current;
+              document.getElementById('stat-back').style.display = statHistory.length ? '' : 'none';
               const p = new URLSearchParams({ period: document.getElementById('stat-period').value });
               const cam = document.getElementById('stat-camera').value;
               const lbl = document.getElementById('stat-label').value;
