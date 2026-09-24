@@ -140,6 +140,11 @@ fr:
   apikey: YOUR_COMPREFACE_API_KEY
   confidence: 0.8              # minimum similarity to consider a match (0.0 - 1.0)
   detprobthreshold: 0.8        # minimum probability that detected area is actually a face (0.0 - 1.0)
+
+# Optional: password for the web UI (HTTP Basic auth); without it the UI is open to anyone who can reach port 8888
+web:
+  user: admin
+  password: change-me
 ```
 
 ### Camera options
@@ -156,7 +161,7 @@ fr:
 | `snapshottrigger` | string | `end` | When to send snapshot: `new`, `update`, or `end` |
 | `topic` | string | `reviews` | Which MQTT topic to use: `reviews` or `events` |
 | `severity` | list | `[detection, alert]` | Frigate review severity filter |
-| `objects` | list | `[]` | Filter by object label and minimum confidence percent |
+| `objects` | list | `[]` | Filter by object label and minimum confidence `percent` (the event's best score; for reviews, the best score of its detections) |
 | `zones` | list | `[]` | Filter by Frigate zone names (empty = all zones) |
 
 ## GIF Previews
@@ -186,7 +191,7 @@ Tested with `qwen2.5vl:7b` on a machine with RTX 3060 — ~2 seconds per image.
 
 ## Web UI
 
-Available at `http://<host>:8888`
+Available at `http://<host>:8888`. The Config tab shows the bot token and MQTT password, so set `web.user` / `web.password` if the port is reachable by others.
 
 - **Log** — live log viewer with filtering by type, camera, text, color-coded by event ID
 - **Last** — latest N events of every camera (grouped by camera) or the history of one camera, as snapshot cards with object, score, time and zones. Click a snapshot to enlarge it. Finished events have **▶ Video** (plays the clip in the page, with seeking) and **⬇** (downloads the clip) buttons; in-progress events show the current frame from Frigate

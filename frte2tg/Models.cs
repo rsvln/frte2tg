@@ -5,14 +5,6 @@ namespace frte2tg
 
     public class Queries
     {
-        public string getCameraLastClipQuery(string camera)
-        {
-            return @"select * 
-                            from recordings
-                            where camera = '" + camera + "' order by end_time desc LIMIT 1;";
-
-        }
-
         public string getCamerasQuery()
         {
             return @"select distinct camera
@@ -22,7 +14,8 @@ namespace frte2tg
 
         }
 
-        public string getEventQuery(string id, string camera, string entity, bool strong = true)
+        // Recording segments covering an event/review; takes $id and $camera parameters (see Program.RecordingsCommand).
+        public string getEventQuery(string entity, bool strong = true)
         {
             if (entity == "review")
                 entity = "reviewsegment";
@@ -40,7 +33,7 @@ namespace frte2tg
                                    (SELECT camera,
                                            start_time
                                     FROM " + entity + @"
-                                    WHERE id = '" + id + @"') s ON rs.camera = s.camera
+                                    WHERE id = $id) s ON rs.camera = s.camera
                                  AND rs.start_time <= s.start_time
                                  ORDER BY rs.start_time DESC
                                  LIMIT 1)
@@ -51,11 +44,11 @@ namespace frte2tg
                                    (SELECT end_time,
                                            camera
                                     FROM " + entity + @"
-                                    WHERE id = '" + id + @"') e ON re.camera = e.camera
+                                    WHERE id = $id) e ON re.camera = e.camera
                                  AND e.end_time " + (strong ? "<= re.end_time" : ">= re.start_time") + 
                                  @" ORDER BY re.end_time " + (strong ? "ASC" : "DESC") +
                                  @" LIMIT 1)
-                              AND r.camera = '" + camera + @"'
+                              AND r.camera = $camera
                             ORDER BY r.start_time";
 
         }
@@ -72,6 +65,14 @@ namespace frte2tg
         public LoggerSettings logger { get; set; }
         public AISettings ai { get; set; }
         public FRSettings fr { get; set; }
+        public WebSettings web { get; set; }
+    }
+
+    // Optional web UI login (HTTP Basic); when user or password is empty the UI is open.
+    public class WebSettings
+    {
+        public string user { get; set; }
+        public string password { get; set; }
     }
 
     public class Objects

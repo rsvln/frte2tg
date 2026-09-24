@@ -300,11 +300,13 @@ namespace frte2tg
 
         // Same rule the bot uses to decide what to send: the camera must be listed in frigate.cameras,
         // and its `objects` list (if not empty) must contain the label.
-        public static bool ConfigAllows(string camera, string label = null)
+        public static bool ConfigAllows(string camera, string label = null, double? score = null)
         {
             var cam = Program.settings.frigate.cameras?.FirstOrDefault(c => c.camera == camera);
             if (cam == null) return false;
-            return label == null || cam.objects == null || cam.objects.Count == 0 || cam.objects.Any(o => o.label == label);
+            if (label == null) return true;
+            if (score != null) return Program.ObjectPasses(cam, label, score.Value);
+            return cam.objects == null || cam.objects.Count == 0 || cam.objects.Any(o => o.label == label);
         }
 
         // `configOnly` limits the stats to cameras and objects the bot is configured to send.
@@ -327,7 +329,7 @@ namespace frte2tg
             string where = " WHERE start_time >= $from" +
                            (camera != null ? " AND camera = $camera" : "");
 
-            using (var cmd = new SqliteCommand("SELECT camera, label, start_time FROM event" + where + " AND " + NotFalsePositive +
+            using (var cmd = new SqliteCommand("SELECT camera, label, start_time, " + ScoreExpr + " AS ev_score FROM event" + where + " AND " + NotFalsePositive +
                                                (label != null ? " AND label = $label" : ""), db))
             {
                 cmd.Parameters.AddWithValue("$from", st.from);
@@ -337,7 +339,7 @@ namespace frte2tg
                 while (dr.Read())
                 {
                     string cam = dr.GetString(0), lab = dr.GetString(1);
-                    if (configOnly && !ConfigAllows(cam, lab)) continue;
+                    if (configOnly && !ConfigAllows(cam, lab, dr.GetDouble(3))) continue;
                     DateTime local = ToLocal(dr.GetDouble(2));
                     st.total++;
                     cameras.Add(cam);
@@ -365,19 +367,35 @@ namespace frte2tg
                 }
             }
 
-            using (var cmd = new SqliteCommand("SELECT camera, label, MAX(start_time) FROM event WHERE " + NotFalsePositive +
-                                               (camera != null ? " AND camera = $camera" : "") +
-                                               (label != null ? " AND label = $label" : "") + " GROUP BY camera, label", db))
+            if (!configOnly)
             {
+                using var cmd = new SqliteCommand("SELECT camera, label, MAX(start_time) FROM event WHERE " + NotFalsePositive +
+                                                  (camera != null ? " AND camera = $camera" : "") +
+                                                  (label != null ? " AND label = $label" : "") + " GROUP BY camera, label", db);
                 if (camera != null) cmd.Parameters.AddWithValue("$camera", camera);
                 if (label != null) cmd.Parameters.AddWithValue("$label", label);
                 using var dr = cmd.ExecuteReader();
                 while (dr.Read())
                 {
                     string cam = dr.GetString(0);
-                    if (configOnly && !ConfigAllows(cam, dr.GetString(1))) continue;
                     if (camera == null && !cameras.Contains(cam)) continue;
                     st.lastByCamera[cam] = Math.Max(st.lastByCamera.GetValueOrDefault(cam), dr.GetDouble(2));
+                }
+            }
+            else if (cameras.Count > 0)
+            {
+                // The last event that passes the camera's thresholds: newest first, until every shown camera has one
+                // (each of them has such an event within the period, so the scan stays within it).
+                using var cmd = new SqliteCommand("SELECT camera, label, start_time, " + ScoreExpr + " AS ev_score FROM event WHERE " + NotFalsePositive +
+                                                  (camera != null ? " AND camera = $camera" : "") + " ORDER BY start_time DESC", db);
+                if (camera != null) cmd.Parameters.AddWithValue("$camera", camera);
+                using var dr = cmd.ExecuteReader();
+                while (dr.Read() && st.lastByCamera.Count < cameras.Count)
+                {
+                    string cam = dr.GetString(0);
+                    if (!cameras.Contains(cam) || st.lastByCamera.ContainsKey(cam)) continue;
+                    if (ConfigAllows(cam, dr.GetString(1), dr.GetDouble(3)))
+                        st.lastByCamera[cam] = dr.GetDouble(2);
                 }
             }
 
