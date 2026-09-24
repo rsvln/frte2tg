@@ -310,6 +310,28 @@ namespace frte2tg
             return ReadEvents(cmd);
         }
 
+        // The events counted by GetStats with the same filters, newest first; `total` is their number before `limit`.
+        public static List<EventRow> GetPeriodEvents(string period, string camera, string label, bool configOnly, int limit, out int total)
+        {
+            if (!TryParsePeriod(period, out DateTime fromUtc, out _))
+                TryParsePeriod(null, out fromUtc, out _);
+            string sql = "SELECT id, camera, label, sub_label, ev_score AS score, start_time, end_time, zones, has_snapshot, has_clip FROM (" +
+                         "  SELECT *, " + ScoreExpr + " AS ev_score FROM event WHERE " + NotFalsePositive + " AND start_time >= $from" +
+                         (camera != null ? " AND camera = $camera" : "") +
+                         (label != null ? " AND label = $label" : "") +
+                         ") ORDER BY start_time DESC";
+            using var db = Open();
+            using var cmd = new SqliteCommand(sql, db);
+            cmd.Parameters.AddWithValue("$from", Unix(fromUtc));
+            if (camera != null) cmd.Parameters.AddWithValue("$camera", camera);
+            if (label != null) cmd.Parameters.AddWithValue("$label", label);
+            var rows = ReadEvents(cmd);
+            if (configOnly)
+                rows = rows.Where(r => ConfigAllows(r.camera, r.label, r.score)).ToList();
+            total = rows.Count;
+            return rows.Take(limit).ToList();
+        }
+
         public static EventRow GetEvent(string id)
         {
             string sql = "SELECT id, camera, label, sub_label, " + ScoreExpr + " AS score, start_time, end_time, zones, has_snapshot, has_clip " +

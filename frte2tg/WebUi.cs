@@ -72,6 +72,24 @@ namespace frte2tg
                     }));
                 }));
 
+                // Events behind a Stats view (same period / camera / label rules as /api/stat).
+                app.MapGet("/api/events", (string period, string camera, string label, int? limit) => Safe(() =>
+                {
+                    bool configOnly = label == "config";
+                    var rows = StatsService.GetPeriodEvents(period, string.IsNullOrEmpty(camera) ? null : camera,
+                                                            configOnly || string.IsNullOrEmpty(label) ? null : label,
+                                                            configOnly, Math.Clamp(limit ?? 200, 1, 500), out int total);
+                    return Results.Ok(new
+                    {
+                        total,
+                        events = rows.Select(r => new
+                        {
+                            r.id, r.camera, r.label, r.sub_label, r.score, r.start_time, r.end_time, r.zones, r.has_snapshot, r.has_clip,
+                            start_local = StatsService.ToLocal(r.start_time).ToString("yyyy-MM-dd HH:mm:ss")
+                        })
+                    });
+                }));
+
                 // label: empty = all objects, "config" = what the bot is configured to send, otherwise a single label.
                 app.MapGet("/api/stat", (string period, string camera, string label) => Safe(() =>
                 {
@@ -982,6 +1000,38 @@ namespace frte2tg
             // objects as in the config, same period.
             const statHistory = [];
             let statShown = null;
+            // The gallery of the events behind the current Stats view; "Back" returns to the numbers.
+            let statGallery = false;
+
+            // A matrix cell first narrows the stats to its camera and object; clicking it again opens its events.
+            function statCellClick(camera, label) {
+              const f = statFilter();
+              if (f[1] === camera && f[2] === label) openStatGallery();
+              else filterStats(camera, label);
+            }
+
+            function openStatGallery() {
+              statGallery = true;
+              loadStats();
+            }
+
+            async function loadStatGallery() {
+              const [period, cam, lbl] = statFilter();
+              const p = new URLSearchParams({ period });
+              if (cam) p.set('camera', cam);
+              if (lbl) p.set('label', lbl);
+              const body = document.getElementById('stats-body');
+              const res = await fetch('/api/events?' + p);
+              if (!res.ok) { body.innerHTML = `<div class="empty">${esc(t('web.error_events'))}</div>`; return; }
+              const data = await res.json();
+              const sel = document.getElementById('stat-period');
+              const what = [cam ? '📷 ' + cam : t('web.all_cameras'),
+                            lbl === 'config' ? t('web.filter_config') : lbl ? labelName(lbl) : t('web.all_objects'),
+                            sel.options[sel.selectedIndex].text].join(' · ');
+              const more = data.total > data.events.length ? ` <span style="color:var(--muted)">${esc(t('web.gallery.shown', data.events.length, data.total))}</span>` : '';
+              body.innerHTML = `<div class="section"><h3>${esc(what)} — ${esc(t('web.gallery.count', data.total))}${more}</h3>
+                ${data.events.length ? `<div class="cards">${data.events.map(eventCard).join('')}</div>` : `<div class="empty">${esc(t('web.no_events_period'))}</div>`}</div>`;
+            }
 
             function statFilter() {
               return ['stat-period', 'stat-camera', 'stat-label'].map(id => document.getElementById(id).value);
@@ -996,6 +1046,7 @@ namespace frte2tg
             }
 
             async function statBack() {
+              if (statGallery) { statGallery = false; await loadStats(); return; }
               const prev = statHistory.pop() ?? (isStatOverview(statFilter()) ? null : statOverview(statFilter()));
               if (!prev) return;
               ['stat-period', 'stat-camera', 'stat-label'].forEach((id, i) => document.getElementById(id).value = prev[i]);
@@ -1009,9 +1060,11 @@ namespace frte2tg
               if (statShown && current.join('|') !== statShown.join('|')) {
                 statHistory.push(statShown);
                 if (statHistory.length > 30) statHistory.shift();
+                statGallery = false;
               }
               statShown = current;
-              document.getElementById('stat-back').style.display = statHistory.length || !isStatOverview(current) ? '' : 'none';
+              document.getElementById('stat-back').style.display = statGallery || statHistory.length || !isStatOverview(current) ? '' : 'none';
+              if (statGallery) return loadStatGallery();
               const p = new URLSearchParams({ period: document.getElementById('stat-period').value });
               const cam = document.getElementById('stat-camera').value;
               const lbl = document.getElementById('stat-label').value;
@@ -1035,7 +1088,7 @@ namespace frte2tg
 
               const max = Math.max(...st.cameras.flatMap(c => Object.values(st.matrix[c])));
               const cell = (v, c, l) => v
-                ? `<td class="clickable" data-c="${esc(c)}" data-l="${esc(l)}" onclick="filterStats(this.dataset.c, this.dataset.l)" style="background:rgba(88,166,255,${(0.08 + 0.5 * v / max).toFixed(2)})">${v}</td>`
+                ? `<td class="clickable" data-c="${esc(c)}" data-l="${esc(l)}" onclick="statCellClick(this.dataset.c, this.dataset.l)" title="${esc(t('web.matrix.cell_hint'))}" style="background:rgba(88,166,255,${(0.08 + 0.5 * v / max).toFixed(2)})">${v}</td>`
                 : `<td class="zero">·</td>`;
               html += `<div class="section"><h3>${t('web.matrix.title')}</h3><div style="overflow-x:auto"><table class="matrix">
                 <tr><th>${t('web.matrix.camera')}</th>${st.labels.map(l => `<th>${esc(labelName(l))}</th>`).join('')}<th>${t('web.matrix.total')}</th><th>${t('web.matrix.last_event')}</th></tr>
@@ -1044,9 +1097,9 @@ namespace frte2tg
                   const sum = Object.values(row).reduce((a, b) => a + b, 0);
                   const last = st.lastByCamera[c];
                   return `<tr><td class="clickable" data-c="${esc(c)}" onclick="filterStats(this.dataset.c)">${esc(c)}</td>${st.labels.map(l => cell(row[l] || 0, c, l)).join('')}
-                    <td>${sum}</td><td style="color:var(--muted)">${last ? ago(last) : ''}</td></tr>`;
+                    <td class="clickable" data-c="${esc(c)}" onclick="statCellClick(this.dataset.c, statFilter()[2])" title="${esc(t('web.matrix.cell_hint'))}">${sum}</td><td style="color:var(--muted)">${last ? ago(last) : ''}</td></tr>`;
                 }).join('')}
-                <tr class="total"><td>${t('web.matrix.total')}</td>${st.labels.map(l => `<td>${st.labelTotals[l]}</td>`).join('')}<td>${st.total}</td><td></td></tr>
+                <tr class="total"><td>${t('web.matrix.total')}</td>${st.labels.map(l => `<td>${st.labelTotals[l]}</td>`).join('')}<td class="clickable" onclick="openStatGallery()" title="${esc(t('web.gallery.open'))}">${st.total}</td><td></td></tr>
               </table></div></div>`;
 
               html += `<div class="section"><h3>${t('web.by_hour')}</h3>${barChart(st.hours, st.hours.map((_, i) => String(i)), st.peakHour)}</div>`;
