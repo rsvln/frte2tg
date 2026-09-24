@@ -1254,13 +1254,7 @@ namespace frte2tg
                         if ((settings.frigate.cameras[cami].zones.Count > 0) && (settings.frigate.cameras[cami].zones.Intersect(fe.after.entered_zones).Count() == 0))
                             return;
 
-                        if ((settings.frigate.cameras[cami].objects.Count() == 0) ||
-                                (
-                                    !(settings.frigate.cameras[cami].objects.Count() > 0) &&
-                                    (settings.frigate.cameras[cami].objects.Select(x => x.label).ToList().Contains(fe.after.label)) &&
-                                    (settings.frigate.cameras[cami].objects[settings.frigate.cameras[cami].objects.FindIndex(m => m.label == fe.after.label)].percent >= fe.after.score)
-                                )
-                           )
+                        if (EventPasses(settings.frigate.cameras[cami], fe.after))
                         {
                             Log("event", fe.after.id, fe.after.camera, "Event end received");
                             _ = Task.Run(() => FrigateEventEndWorker(fe: fe));
@@ -1277,13 +1271,7 @@ namespace frte2tg
                         if ((settings.frigate.cameras[cami].zones.Count > 0) && (settings.frigate.cameras[cami].zones.Intersect(fe.after.entered_zones).Count() == 0))
                             return;
 
-                        if ((settings.frigate.cameras[cami].objects.Count() == 0) ||
-                                (
-                                    (settings.frigate.cameras[cami].objects.Count() > 0) &&
-                                    (settings.frigate.cameras[cami].objects.Select(x => x.label).ToList().Contains(fe.after.label)) &&
-                                    (settings.frigate.cameras[cami].objects[settings.frigate.cameras[cami].objects.FindIndex(m => m.label == fe.after.label)].percent >= fe.after.score)
-                                )
-                           )
+                        if (EventPasses(settings.frigate.cameras[cami], fe.after))
                         {
                             Log("event", fe.after.id, fe.after.camera, "Event new received");
                             _ = Task.Run(() => FrigateEventNewWorker(fe: fe));
@@ -1325,12 +1313,7 @@ namespace frte2tg
                             return;
 
 
-                        if ((settings.frigate.cameras[cami].objects.Count() == 0) ||
-                                (
-                                    (settings.frigate.cameras[cami].objects.Count() > 0) &&
-                                    (settings.frigate.cameras[cami].objects.Select(x => x.label).ToList().Intersect(fr.after.data.objects).Count() > 0)
-                                )
-                           )
+                        if (ReviewPasses(settings.frigate.cameras[cami], fr))
                         {
                             Log("review", fr.after.id, fr.after.camera, "Review end received");
                             _ = Task.Run(() => FrigateReviewEndWorker(fr: fr));
@@ -1349,12 +1332,7 @@ namespace frte2tg
                         if ((settings.frigate.cameras[cami].zones.Count > 0) && (settings.frigate.cameras[cami].zones.Intersect(fr.after.data.zones).Count() == 0))
                             return;
 
-                        if ((settings.frigate.cameras[cami].objects.Count() == 0) ||
-                                (
-                                    (settings.frigate.cameras[cami].objects.Count() > 0) &&
-                                    (settings.frigate.cameras[cami].objects.Select(x => x.label).ToList().Intersect(fr.after.data.objects).Count() > 0)
-                                )
-                           )
+                        if (ReviewPasses(settings.frigate.cameras[cami], fr))
                         {
                             Log("review", fr.after.id, fr.after.camera, "Review new/update received");
                             _ = Task.Run(() => FrigateReviewNewWorker(fr: fr));
@@ -1368,6 +1346,57 @@ namespace frte2tg
             }
 
             return;
+        }
+
+        // `objects` filter of a camera: no list = everything passes; otherwise the label must be listed and
+        // the score (0..1 from Frigate) must reach its `percent`.
+        static bool ObjectPasses(Camera cam, string label, double score)
+        {
+            if (cam.objects == null || cam.objects.Count == 0)
+                return true;
+            var obj = cam.objects.FirstOrDefault(o => o.label == label);
+            return obj != null && score * 100 >= obj.percent;
+        }
+
+        // Events are judged by their best score so far (top_score), falling back to the current one.
+        static bool EventPasses(Camera cam, BeforeAfterFE ev)
+        {
+            double score = Math.Max(ev.top_score, ev.score);
+            if (ObjectPasses(cam, ev.label, score))
+                return true;
+            var obj = cam.objects.FirstOrDefault(o => o.label == ev.label);
+            if (obj != null)
+                Log("event", ev.id, ev.camera, $"Skipped: {ev.label} {Math.Round(score * 100)}% < {obj.percent}%");
+            return false;
+        }
+
+        // Review messages carry no scores, so the thresholds are checked against the top_score of the review's
+        // detections in Frigate's DB. Detections not in the DB yet (an early "new") are judged by label only.
+        static bool ReviewPasses(Camera cam, FrigateReview fr)
+        {
+            if (cam.objects == null || cam.objects.Count == 0)
+                return true;
+            var labels = cam.objects.Select(o => o.label).ToList();
+            if (fr.after.data?.objects == null || !fr.after.data.objects.Intersect(labels).Any())
+                return false;
+
+            List<EventRow> events;
+            try
+            {
+                events = (fr.after.data.detections ?? new List<string>()).Select(StatsService.GetEvent).Where(e => e != null).ToList();
+            }
+            catch (Exception ex)
+            {
+                Log("review", fr.after.id, fr.after.camera, "Cannot check object thresholds, passing by label: " + ex.Message);
+                return true;
+            }
+            if (events.Count == 0 || events.Any(e => ObjectPasses(cam, e.label, e.score)))
+                return true;
+
+            Log("review", fr.after.id, fr.after.camera, "Skipped: " + string.Join(", ", events
+                .Where(e => labels.Contains(e.label))
+                .Select(e => $"{e.label} {Math.Round(e.score * 100)}% < {cam.objects.First(o => o.label == e.label).percent}%")));
+            return false;
         }
 
         async static Task MqttClientConnectedAsync(MqttClientConnectedEventArgs arg)
