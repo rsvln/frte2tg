@@ -22,6 +22,7 @@ namespace frte2tg
     {
         public static SettingsFile settings;
         public static ITelegramBotClient bot;
+        static CancellationTokenSource tgPollingCts;
         public static SemaphoreSlim tgSemaphore = new SemaphoreSlim(1, 1);
         public static MqttClientFactory mqttFactory;
         public static IMqttClient mqttClient;
@@ -67,8 +68,26 @@ namespace frte2tg
             if (goAI) { aiQueue.Stop(); goAI = false; }
             if (goFR) { frQueue.Stop(); goFR = false; }
 
-            if (mqttClient != null && mqttClient.IsConnected)
-                await mqttClient.DisconnectAsync();
+            // Re-initialization (settings saved in the web UI) must stop the previous Telegram polling and MQTT client,
+            // otherwise two pollers fight over getUpdates (409 Conflict) and the old client keeps reconnecting.
+            tgPollingCts?.Cancel();
+            tgPollingCts = new CancellationTokenSource();
+
+            if (mqttClient != null)
+            {
+                var oldClient = mqttClient;
+                oldClient.ApplicationMessageReceivedAsync -= MqttClientApplicationMessageReceivedAsync;
+                oldClient.ConnectedAsync -= MqttClientConnectedAsync;
+                oldClient.DisconnectedAsync -= MqttClientDisconnectedAsync;
+                try
+                {
+                    if (oldClient.IsConnected)
+                        await oldClient.DisconnectAsync();
+                }
+                catch (Exception ex) { Log("app", "", "", "Error while disconnecting from mqtt server: " + ex.Message); }
+                oldClient.Dispose();
+                mqttClient = null;
+            }
 
             bot = new TelegramBotClient(
                 new TelegramBotClientOptions(
@@ -78,7 +97,7 @@ namespace frte2tg
                 updateHandler: TgHandleUpdateAsync,
                 errorHandler: TgHandlePollingErrorAsync,
                 receiverOptions: new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() },
-                cancellationToken: CancellationToken.None);
+                cancellationToken: tgPollingCts.Token);
             _ = Task.Run(() => bot.GetMe());
             _ = Task.Run(async () =>
             {
