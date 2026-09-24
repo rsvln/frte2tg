@@ -4,10 +4,12 @@ import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { indentWithTab } from "@codemirror/commands";
-import { indentUnit, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { yaml } from "@codemirror/lang-yaml";
+import { indentUnit, HighlightStyle, syntaxHighlighting, StreamLanguage } from "@codemirror/language";
+import { yaml, yamlLanguage } from "@codemirror/lang-yaml";
 import { linter, lintGutter } from "@codemirror/lint";
-import { tags } from "@lezer/highlight";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { tags, highlightCode } from "@lezer/highlight";
+import { StyleModule } from "style-mod";
 import { parseDocument } from "yaml";
 
 const INDENT = "  ";
@@ -55,12 +57,38 @@ const theme = EditorView.theme({
 // Syntax colors (tokens from the YAML grammar).
 const highlight = HighlightStyle.define([
   { tag: [tags.propertyName, tags.definition(tags.propertyName)], color: "#7ee787" },
-  { tag: [tags.string, tags.special(tags.string)], color: "#a5d6ff" },
+  { tag: [tags.string, tags.special(tags.string), tags.content], color: "#a5d6ff" },
   { tag: [tags.number, tags.bool, tags.null, tags.atom], color: "#79c0ff" },
   { tag: tags.comment, color: "#8b949e", fontStyle: "italic" },
   { tag: [tags.keyword, tags.typeName, tags.meta, tags.labelName], color: "#ff7b72" },
   { tag: [tags.punctuation, tags.separator, tags.squareBracket, tags.brace], color: "#c9d1d9" }
 ]);
+
+const shellLanguage = StreamLanguage.define(shell);
+const codeLanguages = { yaml: yamlLanguage, yml: yamlLanguage, bash: shellLanguage, sh: shellLanguage, shell: shellLanguage };
+
+// Colors the <pre><code class="language-xxx"> blocks under `root` (Markdig output) with the editor's highlight style.
+export function highlightCodeBlocks(root) {
+  if (highlight.module)
+    StyleModule.mount(document, highlight.module);
+  root.querySelectorAll("pre > code[class*='language-']").forEach(code => {
+    const lang = [...code.classList].map(c => c.replace("language-", "")).find(l => codeLanguages[l]);
+    if (!lang) return;
+    const text = code.textContent;
+    const tree = codeLanguages[lang].parser.parse(text);
+    const out = document.createDocumentFragment();
+    highlightCode(text, tree, highlight,
+      (piece, classes) => {
+        if (!classes) { out.append(piece); return; }
+        const span = document.createElement("span");
+        span.className = classes;
+        span.textContent = piece;
+        out.append(span);
+      },
+      () => out.append("\n"));
+    code.replaceChildren(out);
+  });
+}
 
 export function createYamlEditor(parent, text, onChange) {
   const view = new EditorView({

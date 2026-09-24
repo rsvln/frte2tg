@@ -890,6 +890,13 @@ namespace frte2tg
               document.getElementById('about-readme').innerHTML = data.readme;
               document.querySelectorAll('#about-readme a[href^="http"]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
               aboutLoaded = true;
+              // Syntax highlighting for code blocks, with the Config editor's colors; plain text if the bundle is unavailable.
+              try {
+                const { highlightCodeBlocks } = await import('/js/yaml-editor.js?v=%VERSION%');
+                highlightCodeBlocks(document.getElementById('about-readme'));
+              } catch (e) {
+                console.warn('Code highlighting is not available', e);
+              }
             }
 
             function openLightbox(src) {
