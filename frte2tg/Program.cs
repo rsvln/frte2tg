@@ -1740,15 +1740,40 @@ namespace frte2tg
 
             if (st.camera == null)
             {
+                // A grid: the cells hold only numbers, emoji go to the header row alone, since their width varies
+                // between clients. Up to 4 object columns; with more, the 3 most frequent plus "•" for the rest,
+                // so the table still fits a phone screen.
+                var labels = st.labels.Count <= 4 ? st.labels : st.labels.Take(3).ToList();
+                var columns = new List<(string head, int headWidth, Func<string, int> value)>
+                {
+                    ("Σ", 1, c => st.matrix[c].Values.Sum())
+                };
+                foreach (var l in labels)
+                    columns.Add((EmojiLabel(l), emojiobj.ContainsKey(l) ? 2 : 1, c => st.matrix[c].GetValueOrDefault(l)));
+                if (st.labels.Count > 4)
+                    columns.Add(("•", 1, c => st.matrix[c].Where(kv => !labels.Contains(kv.Key)).Sum(kv => kv.Value)));
+
+                static string Cell(int v) => v == 0 ? "·" : v.ToString();
+                int nameWidth = st.cameras.Max(c => c.Length);
+                var widths = columns.Select(col => Math.Max(4, st.cameras.Max(c => Cell(col.value(c)).Length))).ToList();
+
                 sb.Append("\n<b>" + L10n.T("tg.stat.by_camera") + "</b>\n<pre>");
-                int cw = st.cameras.Max(c => c.Length);
+                sb.Append(new string(' ', nameWidth));
+                for (int i = 0; i < columns.Count; i++)
+                    sb.Append(' ').Append(new string(' ', widths[i] - columns[i].headWidth)).Append(columns[i].head);
+                sb.Append("    ⏱\n");
                 foreach (var c in st.cameras)
                 {
-                    var row = st.matrix[c];
-                    sb.Append(WebUtility.HtmlEncode(c.PadRight(cw))).Append(' ').Append(row.Values.Sum().ToString().PadLeft(5)).Append("  ")
-                      .Append(string.Join(" ", row.OrderByDescending(kv => kv.Value).Select(kv => EmojiLabel(kv.Key) + kv.Value)));
+                    sb.Append(WebUtility.HtmlEncode(c.PadRight(nameWidth)));
+                    for (int i = 0; i < columns.Count; i++)
+                        sb.Append(' ').Append(Cell(columns[i].value(c)).PadLeft(widths[i]));
+                    // Always 5 characters: time for today, date for earlier days.
                     if (st.lastByCamera.TryGetValue(c, out double last))
-                        sb.Append("  ⏱").Append(FormatShortTime(last, "HH:mm"));
+                    {
+                        DateTime t = StatsService.ToLocal(last);
+                        bool today = t.Date == DateTime.UtcNow.AddMinutes(settings.options.timeoffset).Date;
+                        sb.Append(' ').Append(t.ToString(today ? "HH:mm" : "dd.MM"));
+                    }
                     sb.Append('\n');
                 }
                 sb.Append("</pre>");
