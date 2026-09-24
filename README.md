@@ -17,7 +17,7 @@ Frigate NVR → Telegram bridge. Subscribes to Frigate MQTT events and reviews, 
 - Telegram rate limit handling with automatic retry
 - Per-camera configuration: objects, zones, severity, triggers, behavior
 - **Telegram commands** `/status`, `/last`, `/stat` — current view, latest N events of every camera, statistics by camera, object, hour and day, with inline buttons
-- **Web UI** (port 8888): live log, latest events with snapshots and **video playback / download**, statistics dashboard, config editor
+- **Web UI** (port 8888): live log, latest events with snapshots and **video playback / download**, statistics dashboard, YAML config editor with apply without restart; optional password
 - **Localization** of Telegram messages and the web UI (`en`, `ru`, easy to add more)
 - Runs as a Docker container
 
@@ -194,12 +194,12 @@ Tested with `qwen2.5vl:7b` on a machine with RTX 3060 — ~2 seconds per image.
 Available at `http://<host>:8888`. The Config tab shows the bot token and MQTT password, so set `web.user` / `web.password` if the port is reachable by others.
 
 - **Log** — live log viewer with filtering by type, camera, text, color-coded by event ID
-- **Last** — latest N events of every camera (grouped by camera) or the history of one camera, as snapshot cards with object, score, time and zones. Click a snapshot to enlarge it. Finished events have **▶ Video** (plays the clip in the page, with seeking) and **⬇** (downloads the clip) buttons; in-progress events show the current frame from Frigate
-- **Stats** — events / alerts / detections for a period (24 h, today, 7 d, 30 d), cameras × objects matrix, activity by hour of day and by day. The object filter defaults to **Config** — only cameras and objects the bot is configured to send; **All** shows everything Frigate saw. Click a matrix cell to filter by that camera and object
-- **Config** — config editor with backup on save
-- **About** — version, build date, links and this manual
+- **Last** — latest N events of every camera (grouped by camera) or the history of one camera, as snapshot cards with object, score, time and zones. Click a snapshot to enlarge it. Every card has **▶ Video** (plays the clip in the page, with seeking) and **⬇** (downloads it); the clip is built from the camera's recording segments, so it works even when Frigate has no clip of its own, and for an event still in progress it covers the recording up to now. In-progress events show the current frame from Frigate
+- **Stats** — events / alerts / detections for a period (24 h, today, 7 d, 30 d), cameras × objects matrix, activity by hour of day and by day. The object filter defaults to **Config** — only cameras and objects (with their `percent` thresholds) the bot is configured to send; **All** shows everything Frigate saw. Click a matrix cell to drill down; **← Back** returns to the previous view or to the overview
+- **Config** — YAML editor with syntax highlighting, error underlining, line numbers, folding and search (Ctrl+F); Tab and pasted tabs become spaces. **Save** writes the file (with a `.bak` backup), **Apply** restarts the services with the saved file, **Save & apply** does both. A config with YAML errors or missing sections is not saved
+- **About** — version, build date, links and this manual with highlighted code
 
-The version and build date are shown in the footer of every page.
+The page remembers the open tab and the filters across reloads. The version and build date are shown in the footer of every page.
 
 ## Localization
 
@@ -219,7 +219,7 @@ Commands are accepted only from chats listed in `telegram.chatids`. Data for `/l
 | `/last` | Latest event of every camera, plus buttons to pick a camera, an object or N per camera |
 | `/last [N] [object]` | Last N events of every camera (default 1), e.g. `/last 3`, `/last 2 person` |
 | `/last <camera> [N] [object]` | Last N events of one camera (default 5), e.g. `/last frontdoor 10`, `/last frontdoor dog` |
-| `/stat [24h\|7d\|30d\|today] [camera\|object]` | Event statistics by object, camera and hour of day, with buttons to switch the period |
+| `/stat [period] [camera or object]` | Event statistics by object, camera and hour of day, with buttons to switch the period; period is `24h` (default), `7d`, `30d` or `today` |
 | `/help` | Help |
 
 Objects can be given by their Frigate label (`person`) or by their name in any locale file (`человек`).
