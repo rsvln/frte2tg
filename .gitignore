@@ -363,3 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 # Local development notes
 DEVELOPMENT.md
+
+# Local publish scripts
+publish-int.bat
+publish-ext.bat
