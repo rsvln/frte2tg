@@ -20,6 +20,10 @@
   "caption.photo": "photo",
   "caption.video": "video",
 
+  "caption.ai": "AI:",
+  "ai.prompt.human": "Briefly describe what the person is doing. What are they holding or carrying? 2-3 sentences. Don't start with 'The image shows'. Don't mention the camera, time, date or text overlays.",
+  "ai.prompt.nonhuman": "Briefly describe what is happening. 2-3 sentences. Don't start with 'The image shows'. Don't mention the camera, time, date or text overlays.",
+  "ai.reply_language": "Answer in English.",
   "fr.prompt_names": "In the photo: {0}. ",
 
   "tg.unauthorized": "go away!",

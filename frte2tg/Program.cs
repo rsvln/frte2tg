@@ -64,7 +64,10 @@ namespace frte2tg
 
         public static async Task Initialize()
         {
-            L10n.Load(settings.options.locale);
+            var o = settings.options;
+            string Or(string l) => string.IsNullOrWhiteSpace(l) ? o.locale : l;
+            L10n.Load(Or(o.weblocale), Or(o.telegramlocale), Or(o.ailocale));
+            Log("app", "", "", "Languages: web " + L10n.Web.Locale + ", telegram " + L10n.Tg.Locale + ", ai " + L10n.Ai.Locale);
 
             if (goAI) { aiQueue.Stop(); goAI = false; }
             if (goFR) { frQueue.Stop(); goFR = false; }
@@ -106,10 +109,10 @@ namespace frte2tg
                 {
                     await bot.SetMyCommands(new[]
                     {
-                        new BotCommand { Command = "status", Description = L10n.T("tg.cmd.status") },
-                        new BotCommand { Command = "last", Description = L10n.T("tg.cmd.last") },
-                        new BotCommand { Command = "stat", Description = L10n.T("tg.cmd.stat") },
-                        new BotCommand { Command = "help", Description = L10n.T("tg.cmd.help") },
+                        new BotCommand { Command = "status", Description = L10n.Tg.T("tg.cmd.status") },
+                        new BotCommand { Command = "last", Description = L10n.Tg.T("tg.cmd.last") },
+                        new BotCommand { Command = "stat", Description = L10n.Tg.T("tg.cmd.stat") },
+                        new BotCommand { Command = "help", Description = L10n.Tg.T("tg.cmd.help") },
                     });
                 }
                 catch (Exception ex) { Log("app", "", "", "Failed to set bot commands: " + ex.Message); }
@@ -184,6 +187,15 @@ namespace frte2tg
             {
                 tgSemaphore.Release();
             }
+        }
+
+        // AI prompt for a snapshot: the config's prompt (or the AI language's default one) plus "answer in <AI language>".
+        static string AiPrompt(bool person)
+        {
+            string prompt = person ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
+            if (string.IsNullOrWhiteSpace(prompt))
+                prompt = L10n.Ai.T(person ? "ai.prompt.human" : "ai.prompt.nonhuman");
+            return prompt.Trim() + " " + L10n.Ai.T("ai.reply_language");
         }
 
         static string LiveSnapshotDir => appLocation + "/live";
@@ -319,7 +331,7 @@ namespace frte2tg
                 List<string> rulabels = new List<string>();
                 if (fr.after.data?.objects != null)
                     foreach (var ob in fr.after.data.objects)
-                        rulabels.Add(L10n.Label(ob.ToLower()));
+                        rulabels.Add(L10n.Tg.Label(ob.ToLower()));
 
                 if (settings.frigate.cameras[cami].snapshot)
                 {
@@ -330,12 +342,12 @@ namespace frte2tg
                         return;
                     }
 
-                    string tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
-                                       L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
-                                       L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
-                                       L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                       (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                       L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
+                    string tgcaption = L10n.Tg.T("caption.review") + " \t" + fr.after.id + "\n" +
+                                       L10n.Tg.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                       L10n.Tg.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                       L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                       (fr.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                       L10n.Tg.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                     List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
                     int i = 1;
@@ -354,7 +366,7 @@ namespace frte2tg
                     if (md.Count > 0)
                     {
                         var imagePaths = fr.after.data.detections.Select(ev => snaps[ev]).ToList();
-                        string aiPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
+                        string aiPrompt = AiPrompt(fr.after.data.objects.Contains("person"));
 
                         int x = 1;
                         foreach (var chid in settings.telegram.chatids)
@@ -414,19 +426,19 @@ namespace frte2tg
             int partid = parts.Count;
 
             if (string.IsNullOrEmpty(tgcaption))
-                tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
-                            L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
-                            L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
-                            L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                            (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                            L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
+                tgcaption = L10n.Tg.T("caption.review") + " \t" + fr.after.id + "\n" +
+                            L10n.Tg.T("caption.camera") + " " + fr.after.camera + "\n" +
+                            L10n.Tg.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                            L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                            (fr.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                            L10n.Tg.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
             // Snapshots resolved by the caller (includes current frames of events still in progress), otherwise Frigate's files.
             var imagePaths = fr.after.data.detections
                 .Select(ev => snaps.TryGetValue(ev, out var p) ? p : settings.frigate.clipspath + "/" + fr.after.camera + "-" + ev + ".jpg")
                 .Where(p => System.IO.File.Exists(p))
                 .ToList();
-            string aiPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
+            string aiPrompt = AiPrompt(fr.after.data.objects.Contains("person"));
 
             if (settings.frigate.cameras[cami].gif)
             {
@@ -510,7 +522,7 @@ namespace frte2tg
                         }
                         else
                         {
-                            string cap = fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video");
+                            string cap = fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video");
                             int x = 1;
                             foreach (var chid in settings.telegram.chatids)
                             {
@@ -540,13 +552,13 @@ namespace frte2tg
                         foreach (var chid in settings.telegram.chatids)
                         {
                             string cap = (firstmessages[chid] != -1)
-                                ? fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video")
-                                : fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video") + "\n" +
-                                  L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
-                                  L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
-                                  L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                  (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                  L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
+                                ? fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video")
+                                : fr.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video") + "\n" +
+                                  L10n.Tg.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                  L10n.Tg.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                  L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                  (fr.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                  L10n.Tg.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                             if (x > 1) await Task.Delay(settings.telegram.sendchatstimepause * 1000);
                             await TgCall(() => bot.SendVideo(
@@ -590,7 +602,7 @@ namespace frte2tg
                 List<string> rulabels = new List<string>();
                 if (fr.after.data?.objects != null)
                     foreach (var ob in fr.after.data.objects)
-                        rulabels.Add(L10n.Label(ob.ToLower()));
+                        rulabels.Add(L10n.Tg.Label(ob.ToLower()));
 
                 List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
                 var snaps = new Dictionary<string, string>();
@@ -601,12 +613,12 @@ namespace frte2tg
                     if (snaps.Count < fr.after.data.detections.Count)
                         Log("review", fr.after.id, camera, "Some snapshots not ready after timeout, will skip missing");
 
-                    tgcaption = L10n.T("caption.review") + " \t" + fr.after.id + "\n" +
-                                L10n.T("caption.camera") + " " + fr.after.camera + "\n" +
-                                L10n.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
-                                L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                (fr.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                L10n.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
+                    tgcaption = L10n.Tg.T("caption.review") + " \t" + fr.after.id + "\n" +
+                                L10n.Tg.T("caption.camera") + " " + fr.after.camera + "\n" +
+                                L10n.Tg.T("caption.objects") + " " + string.Join(", ", rulabels) + "\n" +
+                                L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                (fr.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fr.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                L10n.Tg.T("caption.events") + " " + string.Join(", ", fr.after.data.detections);
 
                     int i = 1;
                     foreach (var ev in fr.after.data.detections)
@@ -645,7 +657,7 @@ namespace frte2tg
                                 frQueue.AddToQueue(new FRTask
                                 {
                                     ImagePaths = fr.after.data.detections.Where(snaps.ContainsKey).Select(ev => snaps[ev]).ToList(),
-                                    AIPrompt = fr.after.data.objects.Contains("person") ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt,
+                                    AIPrompt = AiPrompt(fr.after.data.objects.Contains("person")),
                                     ChatId = long.Parse(chid),
                                     MessageId = firstmessages[chid],
                                     Camera = camera,
@@ -657,7 +669,7 @@ namespace frte2tg
                                 aiQueue.AddToQueue(new AITask
                                 {
                                     ImagePaths = fr.after.data.detections.Where(snaps.ContainsKey).Select(ev => snaps[ev]).ToList(),
-                                    Prompt = fr.after.data.objects.Contains("person") ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
+                                    Prompt = AiPrompt(fr.after.data.objects.Contains("person")),
                                     ChatId = long.Parse(chid),
                                     MessageId = firstmessages[chid],
                                     Camera = camera,
@@ -780,7 +792,7 @@ namespace frte2tg
                 int cami = settings.frigate.cameras.FindIndex(m => m.camera == camera);
                 Log("event", fe.after.id, camera, "Start event new/update worker");
 
-                string rulabel = L10n.Label(fe.after.label.ToLower())
+                string rulabel = L10n.Tg.Label(fe.after.label.ToLower())
                                + " (" + (fe.after.score * 100).ToString("0.00") + "%)";
 
                 if (fe.after.has_snapshot && settings.frigate.cameras[cami].snapshot)
@@ -792,18 +804,18 @@ namespace frte2tg
                         return;
                     }
 
-                    string aiPrompt = fe.after.label == "person" ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
+                    string aiPrompt = AiPrompt(fe.after.label == "person");
                     var imagePaths = new List<string> { snapshotPath };
 
                     int x = 1;
                     foreach (var chid in settings.telegram.chatids)
                     {
-                        string tgcaption = fe.after.id + " " + L10n.T("caption.photo") + "\n" +
-                                           L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
-                                           L10n.T("caption.object") + " " + rulabel + "\n" +
-                                           L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                           (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
-                                           L10n.T("caption.event") + " " + fe.after.id;
+                        string tgcaption = fe.after.id + " " + L10n.Tg.T("caption.photo") + "\n" +
+                                           L10n.Tg.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                           L10n.Tg.T("caption.object") + " " + rulabel + "\n" +
+                                           L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                           (fe.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "") +
+                                           L10n.Tg.T("caption.event") + " " + fe.after.id;
 
                         Message msg = await TgCall(() => bot.SendPhoto(
                             chatId: chid,
@@ -865,14 +877,14 @@ namespace frte2tg
             int partid = parts.Count;
 
             if (string.IsNullOrEmpty(tgcaption))
-                tgcaption = L10n.T("caption.event") + " \t" + fe.after.id + "\n" +
-                            L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
-                            L10n.T("caption.object") + " " + rulabel + "\n" +
-                            L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                            (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                tgcaption = L10n.Tg.T("caption.event") + " \t" + fe.after.id + "\n" +
+                            L10n.Tg.T("caption.camera") + " " + fe.after.camera + "\n" +
+                            L10n.Tg.T("caption.object") + " " + rulabel + "\n" +
+                            L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                            (fe.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
             var imagePaths = new List<string> { settings.frigate.clipspath + "/" + fe.after.camera + "-" + fe.after.id + ".jpg" };
-            string aiPrompt = fe.after.label == "person" ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
+            string aiPrompt = AiPrompt(fe.after.label == "person");
 
             if (settings.frigate.cameras[cami].gif)
             {
@@ -956,7 +968,7 @@ namespace frte2tg
                         }
                         else
                         {
-                            string cap = fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video");
+                            string cap = fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video");
                             int x = 1;
                             foreach (var chid in settings.telegram.chatids)
                             {
@@ -986,12 +998,12 @@ namespace frte2tg
                         foreach (var chid in settings.telegram.chatids)
                         {
                             string cap = (firstmessages[chid] != -1)
-                                ? fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video")
-                                : fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.T("caption.video") + "\n" +
-                                  L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
-                                  L10n.T("caption.object") + " " + rulabel + "\n" +
-                                  L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                  (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                                ? fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video")
+                                : fe.after.id + ((partid == 1) ? "" : "[" + i + "]") + " " + L10n.Tg.T("caption.video") + "\n" +
+                                  L10n.Tg.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                  L10n.Tg.T("caption.object") + " " + rulabel + "\n" +
+                                  L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                  (fe.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
                             if (x > 1) await Task.Delay(settings.telegram.sendchatstimepause * 1000);
                             await TgCall(() => bot.SendVideo(
@@ -1033,7 +1045,7 @@ namespace frte2tg
                 foreach (var chid in settings.telegram.chatids)
                     firstmessages.Add(chid, -1);
 
-                string rulabel = L10n.Label(fe.after.label.ToLower())
+                string rulabel = L10n.Tg.Label(fe.after.label.ToLower())
                                + " (" + (fe.after.score * 100).ToString("0.00") + "%)";
 
                 List<IAlbumInputMedia> md = new List<IAlbumInputMedia>();
@@ -1054,11 +1066,11 @@ namespace frte2tg
                         Log("event", fe.after.id, camera, "Snapshot not ready after timeout, skipping");
                     else
                     {
-                        tgcaption = L10n.T("caption.review") + " \t" + fe.after.id + "\n" +
-                                    L10n.T("caption.camera") + " " + fe.after.camera + "\n" +
-                                    L10n.T("caption.object") + " " + rulabel + "\n" +
-                                    L10n.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
-                                    (fe.after.end_time.HasValue ? L10n.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
+                        tgcaption = L10n.Tg.T("caption.review") + " \t" + fe.after.id + "\n" +
+                                    L10n.Tg.T("caption.camera") + " " + fe.after.camera + "\n" +
+                                    L10n.Tg.T("caption.object") + " " + rulabel + "\n" +
+                                    L10n.Tg.T("caption.start") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.start_time).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" +
+                                    (fe.after.end_time.HasValue ? L10n.Tg.T("caption.end") + " " + DateTime.UnixEpoch.AddSeconds(fe.after.end_time.Value).AddMinutes(settings.options.timeoffset).ToString("yyyy-MM-dd HH:mm:ss") + "\n" : "");
 
                         md.Add(new InputMediaPhoto(
                             new InputFileStream(System.IO.File.OpenRead(snapPath), fe.after.camera + "-" + fe.after.id + ".jpg"))
@@ -1086,7 +1098,7 @@ namespace frte2tg
                                     frQueue.AddToQueue(new FRTask
                                     {
                                         ImagePaths = new List<string> { snapPath },
-                                        AIPrompt = fe.after.label == "person" ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt,
+                                        AIPrompt = AiPrompt(fe.after.label == "person"),
                                         ChatId = long.Parse(chid),
                                         MessageId = firstmessages[chid],
                                         Camera = camera,
@@ -1098,7 +1110,7 @@ namespace frte2tg
                                     aiQueue.AddToQueue(new AITask
                                     {
                                         ImagePaths = new List<string> { snapPath },
-                                        Prompt = fe.after.label == "person" ? settings.ai.humanprompt : settings.ai.nonhumanprompt,
+                                        Prompt = AiPrompt(fe.after.label == "person"),
                                         ChatId = long.Parse(chid),
                                         MessageId = firstmessages[chid],
                                         Camera = camera,
@@ -1463,7 +1475,7 @@ namespace frte2tg
             if (!settings.telegram.chatids.Contains(message.Chat.Id.ToString()))
             {
                 Log("tg", "", message.From.Id.ToString(), "Unauthorized access attempt from " + message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"));
-                await TgCall(() => botClient.SendMessage(chatId: message.Chat.Id, text: L10n.T("tg.unauthorized"), cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
+                await TgCall(() => botClient.SendMessage(chatId: message.Chat.Id, text: L10n.Tg.T("tg.unauthorized"), cancellationToken: cancellationToken), "tg", "", message.Chat.Id.ToString());
                 return;
             }
 
@@ -1491,7 +1503,7 @@ namespace frte2tg
             if (command == "/private" || command == "/help" || command == "/start")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending help");
-                string helpText = L10n.T("tg.help") + "\n\n" + L10n.T("tg.help.version", VersionInfo.Version);
+                string helpText = L10n.Tg.T("tg.help") + "\n\n" + L10n.Tg.T("tg.help.version", VersionInfo.Version);
                 await TgCall(() => botClient.SendMessage(
                     chatId: message.Chat.Id,
                     text: helpText,
@@ -1503,7 +1515,7 @@ namespace frte2tg
             if (command == "/status")
             {
                 Log("tg", message.From.Id + (string.IsNullOrEmpty(message.From.Username) ? "" : " (@" + message.From.Username + ")"), message.Chat.Id.ToString(), "Sending status");
-                int? waitId = await TgSendWaitAsync(botClient, message.Chat.Id, L10n.T("tg.wait.status"), cancellationToken);
+                int? waitId = await TgSendWaitAsync(botClient, message.Chat.Id, L10n.Tg.T("tg.wait.status"), cancellationToken);
                 using var db = new SqliteConnection("Data Source = " + settings.frigate.dbpath);
                 db.Open();
                 using var dr = (new SqliteCommand(new Queries().getCamerasQuery(), db)).ExecuteReader();
@@ -1520,7 +1532,7 @@ namespace frte2tg
                         md.Add(new InputMediaPhoto(
                             new InputFileStream(System.IO.File.OpenRead(localPath), dr["camera"].ToString() + "_" + rnd + ".jpg"))
                         {
-                            Caption = ((i == 1) || (i % 11 == 0)) ? L10n.T("tg.status.caption") : null
+                            Caption = ((i == 1) || (i % 11 == 0)) ? L10n.Tg.T("tg.status.caption") : null
                         });
 
                         if (i % 10 == 0)
@@ -1595,7 +1607,7 @@ namespace frte2tg
                     return;
                 }
 
-                waitId = await TgSendWaitAsync(botClient, chatId, L10n.T("tg.wait.last"), cancellationToken);
+                waitId = await TgSendWaitAsync(botClient, chatId, L10n.Tg.T("tg.wait.last"), cancellationToken);
 
                 // No camera given: last N events of every camera (N defaults to 1). Camera given: last N of that camera (N defaults to 5).
                 bool overview = f.camera == null && f.label == null && f.limit == null;
@@ -1604,7 +1616,7 @@ namespace frte2tg
                 List<EventRow> rows = perCamera ? StatsService.GetLastPerCamera(limit, f.label) : StatsService.GetLast(f.camera, f.label, limit);
 
                 if (rows.Count == 0)
-                    await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.last.none"), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                    await TgCall(() => botClient.SendMessage(chatId, L10n.Tg.T("tg.last.none"), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
 
                 var snaps = new List<(EventRow row, byte[] jpg)>();
                 foreach (var r in rows)
@@ -1612,11 +1624,11 @@ namespace frte2tg
                 var withoutSnap = snaps.Where(s => s.jpg == null).Select(s => s.row).ToList();
 
                 // One album per camera when several events per camera were asked for, otherwise one shared album.
-                string filterTitle = f.label != null ? " · " + EmojiLabel(f.label) + " " + WebUtility.HtmlEncode(L10n.Label(f.label)) : "";
+                string filterTitle = f.label != null ? " · " + EmojiLabel(f.label) + " " + WebUtility.HtmlEncode(L10n.Tg.Label(f.label)) : "";
                 var groups = perCamera && limit > 1
                     ? snaps.Where(s => s.jpg != null).GroupBy(s => s.row.camera)
                            .Select(g => (title: "<b>📷 " + WebUtility.HtmlEncode(g.Key) + "</b>" + filterTitle, items: g.ToList()))
-                    : new[] { (title: (perCamera ? "<b>" + L10n.T("tg.last.title_all") + "</b>" : "<b>📷 " + WebUtility.HtmlEncode(f.camera) + "</b>") + filterTitle,
+                    : new[] { (title: (perCamera ? "<b>" + L10n.Tg.T("tg.last.title_all") + "</b>" : "<b>📷 " + WebUtility.HtmlEncode(f.camera) + "</b>") + filterTitle,
                                 items: snaps.Where(s => s.jpg != null).ToList()) };
 
                 foreach (var (title, items) in groups)
@@ -1650,27 +1662,27 @@ namespace frte2tg
 
                 if (withoutSnap.Count > 0)
                 {
-                    string text = "<b>" + L10n.T("tg.last.no_snapshot") + "</b>\n" + string.Join("\n", withoutSnap.Select(FormatEventLine));
+                    string text = "<b>" + L10n.Tg.T("tg.last.no_snapshot") + "</b>\n" + string.Join("\n", withoutSnap.Select(FormatEventLine));
                     await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
                 }
 
                 if (overview)
                 {
                     MetaResult meta = StatsService.GetMeta();
-                    var buttons = new[] { 3, 5 }.Select(n => (text: L10n.T("tg.last.per_camera", n), data: CallbackData("last|" + n)))
+                    var buttons = new[] { 3, 5 }.Select(n => (text: L10n.Tg.T("tg.last.per_camera", n), data: CallbackData("last|" + n)))
                                   .Concat(meta.cameras.Select(c => (text: "📷 " + c, data: CallbackData("last|" + c))))
-                                  .Concat(meta.labels.Select(l => (text: EmojiLabel(l) + " " + L10n.Label(l), data: CallbackData("last|" + l))))
+                                  .Concat(meta.labels.Select(l => (text: EmojiLabel(l) + " " + L10n.Tg.Label(l), data: CallbackData("last|" + l))))
                                   .Where(b => b.data != null)
                                   .Select(b => InlineKeyboardButton.WithCallbackData(b.text, b.data))
                                   .Chunk(3);
-                    await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.last.pick"),
+                    await TgCall(() => botClient.SendMessage(chatId, L10n.Tg.T("tg.last.pick"),
                                                              replyMarkup: new InlineKeyboardMarkup(buttons), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
                 }
             }
             catch (Exception ex)
             {
                 Log("tg", "", chatId.ToString(), "Error: /last failed: " + ex.Message);
-                await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                await TgCall(() => botClient.SendMessage(chatId, L10n.Tg.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
             }
             finally
             {
@@ -1691,13 +1703,13 @@ namespace frte2tg
                 }
 
                 string suffix = "|" + (f.camera ?? "") + "|" + (f.label ?? "");
-                var periods = new[] { "24h", "today", "7d", "30d" }.Select(p => (L10n.T("tg.stat.btn." + p), p));
+                var periods = new[] { "24h", "today", "7d", "30d" }.Select(p => (L10n.Tg.T("tg.stat.btn." + p), p));
                 var keyboard = new InlineKeyboardMarkup(periods
                     .Select(p => InlineKeyboardButton.WithCallbackData(p.Item1, CallbackData("stat|" + p.Item2 + suffix) ?? "stat|" + p.Item2 + "||")));
 
                 // Visible reaction right away: a period button turns the message into "calculating…", a command gets a wait message.
                 StatsService.TryParsePeriod(f.period, out _, out string periodTitle);
-                string waitText = L10n.T("tg.wait.stat", periodTitle);
+                string waitText = L10n.Tg.T("tg.wait.stat", periodTitle);
                 int? waitId = null;
                 if (editMessageId.HasValue)
                 {
@@ -1712,7 +1724,7 @@ namespace frte2tg
                     waitId = await TgSendWaitAsync(botClient, chatId, waitText, cancellationToken);
 
                 StatsResult st = StatsService.GetStats(f.period, f.camera, f.label);
-                string text = FormatStat(st) + "\n<i>" + L10n.T("tg.stat.updated", DateTime.UtcNow.AddMinutes(settings.options.timeoffset).ToString("HH:mm:ss")) + "</i>";
+                string text = FormatStat(st) + "\n<i>" + L10n.Tg.T("tg.stat.updated", DateTime.UtcNow.AddMinutes(settings.options.timeoffset).ToString("HH:mm:ss")) + "</i>";
 
                 if (editMessageId.HasValue)
                     await TgCall(() => botClient.EditMessageText(chatId, editMessageId.Value, text, parseMode: ParseMode.Html,
@@ -1727,7 +1739,7 @@ namespace frte2tg
             catch (Exception ex)
             {
                 Log("tg", "", chatId.ToString(), "Error: /stat failed: " + ex.Message);
-                await TgCall(() => botClient.SendMessage(chatId, L10n.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
+                await TgCall(() => botClient.SendMessage(chatId, L10n.Tg.T("tg.error", ex.Message), cancellationToken: cancellationToken), "tg", "", chatId.ToString());
             }
         }
 
@@ -1757,10 +1769,10 @@ namespace frte2tg
         static async Task TgSendUnknown(ITelegramBotClient botClient, long chatId, List<string> unknown, CancellationToken cancellationToken)
         {
             MetaResult meta = StatsService.GetMeta();
-            string text = L10n.T("tg.unknown", WebUtility.HtmlEncode(string.Join(", ", unknown))) + "\n\n" +
-                          "<b>" + L10n.T("tg.unknown.cameras") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.cameras)) + "\n" +
-                          "<b>" + L10n.T("tg.unknown.objects") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.labels)) + "\n" +
-                          "<b>" + L10n.T("tg.unknown.periods") + "</b> 24h, 7d, 30d, today";
+            string text = L10n.Tg.T("tg.unknown", WebUtility.HtmlEncode(string.Join(", ", unknown))) + "\n\n" +
+                          "<b>" + L10n.Tg.T("tg.unknown.cameras") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.cameras)) + "\n" +
+                          "<b>" + L10n.Tg.T("tg.unknown.objects") + "</b> " + WebUtility.HtmlEncode(string.Join(", ", meta.labels)) + "\n" +
+                          "<b>" + L10n.Tg.T("tg.unknown.periods") + "</b> 24h, 7d, 30d, today";
             await TgCall(() => botClient.SendMessage(chatId, text, parseMode: ParseMode.Html, cancellationToken: cancellationToken), "tg", "", chatId.ToString());
         }
 
@@ -1777,9 +1789,9 @@ namespace frte2tg
         static string FormatEventLine(EventRow r)
         {
             string time = FormatShortTime(r.start_time, "HH:mm:ss");
-            return WebUtility.HtmlEncode(r.camera) + " · " + EmojiLabel(r.label) + " " + WebUtility.HtmlEncode(L10n.Label(r.label)) +
+            return WebUtility.HtmlEncode(r.camera) + " · " + EmojiLabel(r.label) + " " + WebUtility.HtmlEncode(L10n.Tg.Label(r.label)) +
                    (r.sub_label != null ? " (" + WebUtility.HtmlEncode(r.sub_label) + ")" : "") +
-                   " · " + Math.Round(r.score * 100) + "% · " + time + (r.end_time == null ? " · ⏳ " + L10n.T("tg.last.in_progress") : "") +
+                   " · " + Math.Round(r.score * 100) + "% · " + time + (r.end_time == null ? " · ⏳ " + L10n.Tg.T("tg.last.in_progress") : "") +
                    (r.zones.Count > 0 ? " · " + WebUtility.HtmlEncode(string.Join(", ", r.zones)) : "");
         }
 
@@ -1794,19 +1806,19 @@ namespace frte2tg
         static string FormatStat(StatsResult st)
         {
             var sb = new StringBuilder();
-            sb.Append("<b>").Append(L10n.T("tg.stat.title", st.period)).Append("</b>");
+            sb.Append("<b>").Append(L10n.Tg.T("tg.stat.title", st.period)).Append("</b>");
             if (st.camera != null) sb.Append(" · 📷 ").Append(WebUtility.HtmlEncode(st.camera));
-            if (st.label != null) sb.Append(" · ").Append(EmojiLabel(st.label)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Label(st.label)));
+            if (st.label != null) sb.Append(" · ").Append(EmojiLabel(st.label)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Tg.Label(st.label)));
             sb.Append('\n');
-            sb.Append(L10n.T("tg.stat.summary", st.total, st.alerts, st.detections)).Append('\n');
+            sb.Append(L10n.Tg.T("tg.stat.summary", st.total, st.alerts, st.detections)).Append('\n');
 
             if (st.total == 0)
-                return sb.Append("\n" + L10n.T("tg.stat.empty")).ToString();
+                return sb.Append("\n" + L10n.Tg.T("tg.stat.empty")).ToString();
 
-            sb.Append("\n<b>" + L10n.T("tg.stat.by_object") + "</b>\n<pre>");
-            int lw = st.labels.Max(l => L10n.Label(l).Length);
+            sb.Append("\n<b>" + L10n.Tg.T("tg.stat.by_object") + "</b>\n<pre>");
+            int lw = st.labels.Max(l => L10n.Tg.Label(l).Length);
             foreach (var l in st.labels)
-                sb.Append(EmojiLabel(l)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Label(l).PadRight(lw))).Append(' ').Append(st.labelTotals[l].ToString().PadLeft(5)).Append('\n');
+                sb.Append(EmojiLabel(l)).Append(' ').Append(WebUtility.HtmlEncode(L10n.Tg.Label(l).PadRight(lw))).Append(' ').Append(st.labelTotals[l].ToString().PadLeft(5)).Append('\n');
             sb.Append("</pre>");
 
             if (st.camera == null)
@@ -1828,7 +1840,7 @@ namespace frte2tg
                 int nameWidth = st.cameras.Max(c => c.Length);
                 var widths = columns.Select(col => Math.Max(4, st.cameras.Max(c => Cell(col.value(c)).Length))).ToList();
 
-                sb.Append("\n<b>" + L10n.T("tg.stat.by_camera") + "</b>\n<pre>");
+                sb.Append("\n<b>" + L10n.Tg.T("tg.stat.by_camera") + "</b>\n<pre>");
                 sb.Append(new string(' ', nameWidth));
                 for (int i = 0; i < columns.Count; i++)
                     sb.Append(' ').Append(new string(' ', widths[i] - columns[i].headWidth)).Append(columns[i].head);
@@ -1850,14 +1862,14 @@ namespace frte2tg
                 sb.Append("</pre>");
             }
             else if (st.lastByCamera.TryGetValue(st.camera, out double last))
-                sb.Append(L10n.T("tg.stat.last_event", FormatShortTime(last, "HH:mm:ss"))).Append('\n');
+                sb.Append(L10n.Tg.T("tg.stat.last_event", FormatShortTime(last, "HH:mm:ss"))).Append('\n');
 
-            sb.Append("\n<b>" + L10n.T("tg.stat.by_hour") + "</b> · " + L10n.T("tg.stat.peak") + " ").Append(st.peakHour.ToString("00")).Append(":00–").Append(((st.peakHour + 1) % 24).ToString("00")).Append(":00\n");
+            sb.Append("\n<b>" + L10n.Tg.T("tg.stat.by_hour") + "</b> · " + L10n.Tg.T("tg.stat.peak") + " ").Append(st.peakHour.ToString("00")).Append(":00–").Append(((st.peakHour + 1) % 24).ToString("00")).Append(":00\n");
             sb.Append("<pre>").Append(Sparkline(st.hours)).Append("\n0     6     12    18   23</pre>");
 
             if (st.days.Count > 2)
             {
-                sb.Append("\n<b>" + L10n.T("tg.stat.by_day") + "</b> · ").Append(DateTime.Parse(st.days[0].day).ToString("dd.MM")).Append(" – ")
+                sb.Append("\n<b>" + L10n.Tg.T("tg.stat.by_day") + "</b> · ").Append(DateTime.Parse(st.days[0].day).ToString("dd.MM")).Append(" – ")
                   .Append(DateTime.Parse(st.days[^1].day).ToString("dd.MM")).Append('\n');
                 sb.Append("<pre>").Append(Sparkline(st.days.Select(d => d.count))).Append("</pre>");
             }

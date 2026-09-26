@@ -255,14 +255,14 @@ namespace frte2tg
         public static bool TryParsePeriod(string period, out DateTime fromUtc, out string title)
         {
             fromUtc = DateTime.UtcNow.AddHours(-24);
-            title = L10n.T("period.hours", 24);
+            title = L10n.Tg.T("period.hours", 24);
             if (string.IsNullOrEmpty(period)) return true;
 
             period = period.ToLower();
-            if (period == "today" || period == "сегодня" || period == L10n.T("period.today").ToLower())
+            if (period == "today" || period == "сегодня" || period == L10n.Tg.T("period.today").ToLower())
             {
                 fromUtc = LocalNow.Date.AddMinutes(-Program.settings.options.timeoffset);
-                title = L10n.T("period.today");
+                title = L10n.Tg.T("period.today");
                 return true;
             }
             var m = Regex.Match(period, @"^(\d{1,3})([hdчд])$");
@@ -270,8 +270,8 @@ namespace frte2tg
             int n = int.Parse(m.Groups[1].Value);
             if (n <= 0) return false;
             bool hours = m.Groups[2].Value is "h" or "ч";
-            if (hours) { fromUtc = DateTime.UtcNow.AddHours(-n); title = L10n.T("period.hours", n); }
-            else { fromUtc = DateTime.UtcNow.AddDays(-n); title = L10n.T("period.days", n); }
+            if (hours) { fromUtc = DateTime.UtcNow.AddHours(-n); title = L10n.Tg.T("period.hours", n); }
+            else { fromUtc = DateTime.UtcNow.AddDays(-n); title = L10n.Tg.T("period.days", n); }
             return true;
         }
 

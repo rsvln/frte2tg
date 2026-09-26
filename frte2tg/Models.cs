@@ -145,6 +145,10 @@ namespace frte2tg
         public bool sendeverythingwhatyouhave { get; set; } = true;
         public int gifwidth { get; set; } = 640;     
         public string locale { get; set; } = "en";
+        // Optional per-area languages; empty = locale.
+        public string weblocale { get; set; }
+        public string telegramlocale { get; set; }
+        public string ailocale { get; set; }
     }
 
     public class LoggerSettings

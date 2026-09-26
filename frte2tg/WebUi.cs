@@ -263,11 +263,11 @@ namespace frte2tg
         // Fills {{key}} placeholders in the page and hands web./label. strings to its scripts as I18N.
         static string Localize(string html)
         {
-            html = System.Text.RegularExpressions.Regex.Replace(html, @"\{\{([\w.]+)\}\}", m => System.Net.WebUtility.HtmlEncode(L10n.T(m.Groups[1].Value)));
+            html = System.Text.RegularExpressions.Regex.Replace(html, @"\{\{([\w.]+)\}\}", m => System.Net.WebUtility.HtmlEncode(L10n.Web.T(m.Groups[1].Value)));
             html = html.Replace("%VERSION%", System.Net.WebUtility.HtmlEncode(VersionInfo.Version))
                        .Replace("%BUILD%", System.Net.WebUtility.HtmlEncode(VersionInfo.BuildDate))
                        .Replace("%URL%", VersionInfo.ProjectUrl);
-            return html.Replace("/*I18N*/{}", System.Text.Json.JsonSerializer.Serialize(L10n.Export("web.", "label.")));
+            return html.Replace("/*I18N*/{}", System.Text.Json.JsonSerializer.Serialize(L10n.Web.Export("web.", "label.")));
         }
 
         static IResult Safe(Func<IResult> f)

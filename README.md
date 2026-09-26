@@ -117,7 +117,10 @@ options:
   retry: 30                    # polling interval in seconds
   sendeverythingwhatyouhave: true  # send partial clips if timeout expires
   gifwidth: 640                # GIF preview width in pixels (height is proportional)
-  locale: en                   # language of Telegram messages and the web UI: en, ru (files in locales/)
+  locale: en                   # language of everything below: en, ru (files in locales/)
+  weblocale: en                # optional: language of the web UI (default: locale)
+  telegramlocale: ru           # optional: language of Telegram messages and commands (default: locale)
+  ailocale: ru                 # optional: language of AI prompts and descriptions (default: locale)
 
 logger:
   file: true
@@ -127,8 +130,8 @@ logger:
 ai:
   url: http://192.168.1.20:11434
   model: "qwen2.5vl:7b"
-  humanprompt: "Кратко опиши что делает человек. Что он держит или несёт? 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
-  nonhumanprompt: "Кратко опиши что происходит. 2-3 предложения. Не начинай с 'На изображении'. Не упоминай камеру, время, дату и текстовые метки."
+  humanprompt: "Briefly describe what the person is doing. What are they holding or carrying?"  # optional, default comes from ailocale
+  nonhumanprompt: "Briefly describe what is happening."                                          # optional, default comes from ailocale
   numpredict: 150              # max tokens in Ollama response, limits description length
   temperature: 0.1             # lower = more deterministic, higher = more creative
   resizetowidth: 640           # resize image before sending to Ollama, 0 to disable
@@ -183,7 +186,7 @@ When the `ai` section is present and `url`/`model` are set, enabling `ai: true` 
 1. Send all snapshots to Ollama after posting to Telegram
 2. Edit the Telegram message caption with AI descriptions for each snapshot
 
-Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
+Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. Without them, the default prompts of the `ailocale` language are used. Every prompt ends with "answer in <ailocale language>", so descriptions come in that language whatever language the prompt is written in. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
 
 Snapshots wider than `resizetowidth` are downscaled with ffmpeg before being sent to Ollama.
 
@@ -203,7 +206,7 @@ The page remembers the open tab and the filters across reloads. The version and 
 
 ## Localization
 
-Telegram messages, bot commands and the web UI are translated. The language is set by `options.locale` (default `en`).
+Telegram messages, bot commands, the web UI and AI descriptions are translated. `options.locale` (default `en`) sets the language of all of them; `weblocale`, `telegramlocale` and `ailocale` override it for the web UI, Telegram and AI separately, e.g. the web UI in English with Telegram and AI in Russian.
 
 Strings live in `locales/<locale>.json` next to the app (`/app/locales` in the container), one flat `"key": "text"` file per language; `en.json` and `ru.json` are included. To add a language, copy `en.json` to e.g. `de.json`, translate the values and set `locale: de`. Keys missing in a translation fall back to English.
 

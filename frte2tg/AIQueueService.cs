@@ -219,7 +219,7 @@ namespace frte2tg
                 if (string.IsNullOrEmpty(description))
                     return null;
 
-                return $"AI: {description}";
+                return L10n.Tg.T("caption.ai") + " " + description;
             }
             catch (Exception ex)
             {
