@@ -671,8 +671,7 @@ namespace frte2tg
                     </select>
 
                     <label>{{web.camera}}</label>
-                    <input type="text" id="filter-camera" placeholder="{{web.camera_placeholder}}" 
-                           oninput="applyFilters()" style="width:130px">
+                    <select id="filter-camera" onchange="applyFilters()"><option value="">{{web.all}}</option></select>
 
                     <label>{{web.text}}</label>
                     <input type="text" id="filter-text" placeholder="{{web.search_placeholder}}" 
@@ -801,7 +800,9 @@ namespace frte2tg
               const state = { tab: document.querySelector('.tab.active')?.dataset.tab || 'log', fields: {} };
               PERSISTED.forEach(id => {
                 const el = document.getElementById(id);
-                if (!metaLoaded && META_FIELDS.includes(id)) { if (id in prev) state.fields[id] = prev[id]; }
+                const notFilled = (!metaLoaded && META_FIELDS.includes(id)) ||
+                                  (id === 'filter-camera' && document.getElementById(id).dataset.key === undefined);
+                if (notFilled) { if (id in prev) state.fields[id] = prev[id]; }
                 else if (el) state.fields[id] = el.type === 'checkbox' ? el.checked : el.value;
               });
               try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch { }
@@ -1143,12 +1144,29 @@ namespace frte2tg
               const res = await fetch('/api/log?lines=' + n);
               const data = await res.json();
               allLines = data.lines;
+              fillLogCameras();
               applyFilters();
+            }
+
+            // Cameras met in the loaded log lines. The camera column also holds Telegram chat ids (numbers), those are skipped.
+            // The selected camera (or the one restored after F5) stays in the list even if its lines scrolled out.
+            function fillLogCameras() {
+              const sel = document.getElementById('filter-camera');
+              const current = sel.value || (sel.dataset.key === undefined ? (readState().fields || {})['filter-camera'] || '' : '');
+              const cams = new Set();
+              allLines.forEach(l => { const c = l.split('\t')[3]; if (c && !/^-?\d+$/.test(c)) cams.add(c); });
+              if (current) cams.add(current);
+              const list = [...cams].sort();
+              if (sel.dataset.key !== list.join('|')) {
+                sel.innerHTML = '<option value="">{{web.all}}</option>' + list.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+                sel.dataset.key = list.join('|');
+              }
+              sel.value = current;
             }
 
             function applyFilters() {
               const type = document.getElementById('filter-type').value.toLowerCase();
-              const camera = document.getElementById('filter-camera').value.toLowerCase();
+              const camera = document.getElementById('filter-camera').value;
               const text = document.getElementById('filter-text').value.toLowerCase();
 
               const filtered = allLines.filter(line => {
@@ -1157,7 +1175,7 @@ namespace frte2tg
                 const [ts, t, id, cam, ...msgParts] = parts;
                 const msg = msgParts.join('\t');
                 if (type && !t.toLowerCase().includes(type)) return false;
-                if (camera && !cam.toLowerCase().includes(camera)) return false;
+                if (camera && cam !== camera) return false;
                 if (text && !msg.toLowerCase().includes(text) && !id.toLowerCase().includes(text)) return false;
                 return true;
               });
