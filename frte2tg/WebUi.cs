@@ -681,9 +681,7 @@ namespace frte2tg
                     <button class="btn" onclick="clearFilters()">{{web.clear}}</button>
 
                   <div class="autoscroll-toggle">
-                    <input type="checkbox" id="autoscroll" checked>
-                    <label for="autoscroll">{{web.autoscroll}}</label>
-                    <label style="margin-left:16px">{{web.autorefresh}}</label>
+                    <label>{{web.autorefresh}}</label>
                     <select id="refresh-interval" onchange="setRefresh()">
                       <option value="0">{{web.off}}</option>
                       <option value="5000" selected>5s</option>
@@ -787,7 +785,7 @@ namespace frte2tg
 
             // The active tab and toolbar values are kept in this browser's localStorage, so F5 restores them.
             const STATE_KEY = 'frte2tg.ui';
-            const PERSISTED = ['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'autoscroll', 'refresh-interval',
+            const PERSISTED = ['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'refresh-interval',
                                'last-camera', 'last-label', 'last-limit', 'last-refresh',
                                'stat-period', 'stat-camera', 'stat-label'];
 
@@ -1165,9 +1163,8 @@ namespace frte2tg
               });
 
               const container = document.getElementById('log-container');
-              container.innerHTML = filtered.map(formatLine).join('');
-              if (document.getElementById('autoscroll').checked)
-                container.scrollTop = container.scrollHeight;
+              // Newest first, so fresh lines are at the top without scrolling.
+              container.innerHTML = filtered.slice().reverse().map(formatLine).join('');
             }
 
             function clearFilters() {
@@ -1303,7 +1300,7 @@ namespace frte2tg
             }
 
 
-            restoreFields(['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'autoscroll', 'refresh-interval',
+            restoreFields(['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'refresh-interval',
                            'last-refresh', 'stat-period']);
             loadLog();
             setRefresh();
