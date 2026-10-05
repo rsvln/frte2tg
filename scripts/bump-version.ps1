@@ -35,7 +35,8 @@ function Get-SourceFileHashes {
         Sort-Object FullName |
         ForEach-Object {
             $rel = $_.FullName.Substring($abs.Length).TrimStart('\', '/')
-            if ($rel -match '^(bin|obj|Properties)[/\\]') { return }
+            # webui is the editor's source; its bundle in web/ is what the app uses and is hashed there
+            if ($rel -match '^(bin|obj|Properties|webui)[/\\]') { return }
             $result[$rel] = Get-FileHash256 $_.FullName
         }
     return $result

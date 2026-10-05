@@ -1,9 +1,9 @@
 {
   "name": "frte2tg-webui",
   "private": true,
-  "description": "YAML editor for the frte2tg web UI, bundled into frte2tg/web/yaml-editor.js",
+  "description": "YAML editor for the frte2tg web UI, bundled into ../web/yaml-editor.js",
   "scripts": {
-    "build": "esbuild yaml-editor.js --bundle --format=esm --minify --legal-comments=eof --outfile=../frte2tg/web/yaml-editor.js"
+    "build": "esbuild yaml-editor.js --bundle --format=esm --minify --legal-comments=eof --outfile=../web/yaml-editor.js"
   },
   "devDependencies": {
     "@codemirror/commands": "^6",

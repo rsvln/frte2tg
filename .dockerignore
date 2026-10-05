@@ -27,3 +27,4 @@ LICENSE
 !.git/config
 !.git/packed-refs
 !.git/refs/heads/**
+frte2tg/webui

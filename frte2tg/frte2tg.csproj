@@ -21,6 +21,11 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Update="locales\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<!-- webui/ is the YAML editor's npm source, kept out of the build; only its bundle in web/ is used -->
+		<Compile Remove="webui\**" />
+		<Content Remove="webui\**" />
+		<None Remove="webui\**" />
+		<EmbeddedResource Remove="webui\**" />
 		<!-- YAML editor bundle built from webui/, favicon -->
 		<None Update="web\*.js;web\*.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<!-- README is rendered on the web UI's About tab -->
