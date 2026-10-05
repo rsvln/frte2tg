@@ -45,7 +45,7 @@ namespace frte2tg
             return bytes;
         }
 
-        static int clipsPathWarned;
+        static int clipsPathWarned, recordingsPathWarned;
 
         // A finished event whose snapshot Frigate serves but clipspath doesn't have: the volume is likely missing or wrong.
         public static void WarnClipsPathOnce()
@@ -178,12 +178,18 @@ namespace frte2tg
             cmd.Parameters.AddWithValue("$start", ev.start_time);
             cmd.Parameters.AddWithValue("$end", ev.end_time ?? (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds);
             using var dr = cmd.ExecuteReader();
+            int known = 0;
             while (dr.Read())
             {
+                known++;
                 string real = dr.GetString(0).Replace(f.recordingsoriginalpath, f.recordingspath);
                 if (System.IO.File.Exists(real))
                     result.Add(real);
             }
+            // Frigate lists segments but none is on disk here: the recordings volume is likely missing or stale.
+            if (known > 0 && result.Count == 0 && Interlocked.Exchange(ref recordingsPathWarned, 1) == 0)
+                Program.Log("app", "", "", "Recording segments are not found in frigate.recordingspath (" + f.recordingspath +
+                                           "), using Frigate's own clips. Check that Frigate's recordings folder is mounted there");
             return result;
         }
 
