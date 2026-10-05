@@ -367,3 +367,4 @@ DEVELOPMENT.md
 # Local publish scripts
 publish-int.bat
 publish-ext.bat
+publish-redeploy.ps1
