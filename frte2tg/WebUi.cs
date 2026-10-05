@@ -73,12 +73,13 @@ namespace frte2tg
                 }));
 
                 // Events behind a Stats view (same period / camera / label rules as /api/stat).
-                app.MapGet("/api/events", (string period, string camera, string label, int? limit) => Safe(() =>
+                app.MapGet("/api/events", (string period, string camera, string label, int? hour, string day, int? limit) => Safe(() =>
                 {
                     bool configOnly = label == "config";
                     var rows = StatsService.GetPeriodEvents(period, string.IsNullOrEmpty(camera) ? null : camera,
                                                             configOnly || string.IsNullOrEmpty(label) ? null : label,
-                                                            configOnly, Math.Clamp(limit ?? 200, 1, 500), out int total);
+                                                            configOnly, hour, string.IsNullOrEmpty(day) ? null : day,
+                                                            Math.Clamp(limit ?? 200, 1, 500), out int total);
                     return Results.Ok(new
                     {
                         total,
@@ -567,6 +568,8 @@ namespace frte2tg
               .bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
               .bar .fill { width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 1px; opacity: 0.85; }
               .bar .fill.peak { background: var(--orange); }
+              .bar.clickable { cursor: pointer; }
+              .bar.clickable:hover .fill { opacity: 1; outline: 1px solid var(--text); }
               .bar .n { font-size: 10px; color: var(--muted); margin-bottom: 2px; font-family: 'JetBrains Mono', monospace; }
               .bar-axis { display: flex; gap: 3px; margin-top: 4px; }
               .bar-axis span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; min-width: 0; overflow: hidden; }
@@ -986,10 +989,11 @@ namespace frte2tg
               document.getElementById('lightbox').classList.remove('show');
             }
 
-            function barChart(values, labels, peakIdx) {
+            // onClick(i) is the name of a function called with the bar's index; bars with a value become clickable.
+            function barChart(values, labels, peakIdx, onClick) {
               const max = Math.max(1, ...values);
               return `<div class="bars">${values.map((v, i) => `
-                  <div class="bar" title="${esc(labels[i])}: ${v}">
+                  <div class="bar${onClick && v ? ' clickable' : ''}" title="${esc(labels[i])}: ${v}${onClick && v ? ' — ' + esc(t('web.gallery.open')) : ''}"${onClick && v ? ` onclick="${onClick}(${i})"` : ''}>
                     <span class="n">${v || ''}</span>
                     <div class="fill${i === peakIdx ? ' peak' : ''}" style="height:${v ? Math.max(2, v / max * 100) : 0}%"></div>
                   </div>`).join('')}</div>
@@ -1008,8 +1012,10 @@ namespace frte2tg
             // objects as in the config, same period.
             const statHistory = [];
             let statShown = null;
-            // The gallery of the events behind the current Stats view; "Back" returns to the numbers.
+            // The gallery of the events behind the current Stats view, optionally narrowed to one hour of day
+            // ({ hour }) or one day ({ day }); false = the numbers. "Back" returns to the numbers.
             let statGallery = false;
+            let statDays = [];
 
             // A matrix cell first narrows the stats to its camera and object; clicking it again opens its events.
             function statCellClick(camera, label) {
@@ -1018,16 +1024,22 @@ namespace frte2tg
               else filterStats(camera, label);
             }
 
-            function openStatGallery() {
-              statGallery = true;
+            function openStatGallery(extra) {
+              statGallery = extra || {};
               loadStats();
             }
+
+            const statHourClick = h => openStatGallery({ hour: h });
+            const statDayClick = i => openStatGallery({ day: statDays[i] });
+            const hourRange = h => String(h).padStart(2, '0') + ':00–' + String((h + 1) % 24).padStart(2, '0') + ':00';
 
             async function loadStatGallery() {
               const [period, cam, lbl] = statFilter();
               const p = new URLSearchParams({ period });
               if (cam) p.set('camera', cam);
               if (lbl) p.set('label', lbl);
+              if (statGallery.hour !== undefined) p.set('hour', statGallery.hour);
+              if (statGallery.day) p.set('day', statGallery.day);
               const body = document.getElementById('stats-body');
               const res = await fetch('/api/events?' + p);
               if (!res.ok) { body.innerHTML = `<div class="empty">${esc(t('web.error_events'))}</div>`; return; }
@@ -1035,7 +1047,9 @@ namespace frte2tg
               const sel = document.getElementById('stat-period');
               const what = [cam ? '📷 ' + cam : t('web.all_cameras'),
                             lbl === 'config' ? t('web.filter_config') : lbl ? labelName(lbl) : t('web.all_objects'),
-                            sel.options[sel.selectedIndex].text].join(' · ');
+                            sel.options[sel.selectedIndex].text,
+                            ...(statGallery.hour !== undefined ? [hourRange(statGallery.hour)] : []),
+                            ...(statGallery.day ? [statGallery.day.slice(8) + '.' + statGallery.day.slice(5, 7)] : [])].join(' · ');
               const more = data.total > data.events.length ? ` <span style="color:var(--muted)">${esc(t('web.gallery.shown', data.events.length, data.total))}</span>` : '';
               body.innerHTML = `<div class="section"><h3>${esc(what)} — ${esc(t('web.gallery.count', data.total))}${more}</h3>
                 ${data.events.length ? `<div class="cards">${data.events.map(eventCard).join('')}</div>` : `<div class="empty">${esc(t('web.no_events_period'))}</div>`}</div>`;
@@ -1110,9 +1124,10 @@ namespace frte2tg
                 <tr class="total"><td>${t('web.matrix.total')}</td>${st.labels.map(l => `<td>${st.labelTotals[l]}</td>`).join('')}<td class="clickable" onclick="openStatGallery()" title="${esc(t('web.gallery.open'))}">${st.total}</td><td></td></tr>
               </table></div></div>`;
 
-              html += `<div class="section"><h3>${t('web.by_hour')}</h3>${barChart(st.hours, st.hours.map((_, i) => String(i)), st.peakHour)}</div>`;
+              html += `<div class="section"><h3>${t('web.by_hour')}</h3>${barChart(st.hours, st.hours.map((_, i) => String(i)), st.peakHour, 'statHourClick')}</div>`;
+              statDays = st.days.map(d => d.day);
               if (st.days.length > 2)
-                html += `<div class="section"><h3>${t('web.by_day')}</h3>${barChart(st.days.map(d => d.count), st.days.map(d => d.day.slice(8) + '.' + d.day.slice(5, 7)), -1)}</div>`;
+                html += `<div class="section"><h3>${t('web.by_day')}</h3>${barChart(st.days.map(d => d.count), st.days.map(d => d.day.slice(8) + '.' + d.day.slice(5, 7)), -1, 'statDayClick')}</div>`;
 
               body.innerHTML = html;
             }

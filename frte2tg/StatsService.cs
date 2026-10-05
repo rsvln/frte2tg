@@ -329,7 +329,9 @@ namespace frte2tg
         }
 
         // The events counted by GetStats with the same filters, newest first; `total` is their number before `limit`.
-        public static List<EventRow> GetPeriodEvents(string period, string camera, string label, bool configOnly, int limit, out int total)
+        // `hour` (0..23) and `day` (yyyy-MM-dd) narrow them to one bar of the "by hour" / "by day" charts, in local time.
+        public static List<EventRow> GetPeriodEvents(string period, string camera, string label, bool configOnly, int? hour, string day,
+                                                     int limit, out int total)
         {
             if (!TryParsePeriod(period, out DateTime fromUtc, out _))
                 TryParsePeriod(null, out fromUtc, out _);
@@ -346,6 +348,10 @@ namespace frte2tg
             var rows = ReadEvents(cmd);
             if (configOnly)
                 rows = rows.Where(r => ConfigAllows(r.camera, r.label, r.score)).ToList();
+            if (hour != null)
+                rows = rows.Where(r => ToLocal(r.start_time).Hour == hour).ToList();
+            if (day != null)
+                rows = rows.Where(r => ToLocal(r.start_time).ToString("yyyy-MM-dd") == day).ToList();
             total = rows.Count;
             return rows.Take(limit).ToList();
         }
