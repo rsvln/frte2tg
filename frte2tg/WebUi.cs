@@ -1138,6 +1138,7 @@ namespace frte2tg
             }
 
             let allLines = [];
+            let logShown = false;
 
             async function loadLog() {
               const n = document.getElementById('log-lines').value;
@@ -1145,7 +1146,7 @@ namespace frte2tg
               const data = await res.json();
               allLines = data.lines;
               fillLogCameras();
-              applyFilters();
+              applyFilters(true);
             }
 
             // Cameras met in the loaded log lines. The camera column also holds Telegram chat ids (numbers), those are skipped.
@@ -1164,7 +1165,7 @@ namespace frte2tg
               sel.value = current;
             }
 
-            function applyFilters() {
+            function applyFilters(keepPosition) {
               const type = document.getElementById('filter-type').value.toLowerCase();
               const camera = document.getElementById('filter-camera').value;
               const text = document.getElementById('filter-text').value.toLowerCase();
@@ -1181,8 +1182,13 @@ namespace frte2tg
               });
 
               const container = document.getElementById('log-container');
-              // Newest first, so fresh lines are at the top without scrolling.
+              // Newest first, so fresh lines are at the top without scrolling. The list opens at the top (the browser
+              // would restore the old scroll position after F5); while reading further down, new lines added above
+              // by auto-refresh don't move the text under the eye; a filter change starts from the top again.
+              const prevTop = container.scrollTop, prevHeight = container.scrollHeight;
               container.innerHTML = filtered.slice().reverse().map(formatLine).join('');
+              container.scrollTop = !keepPosition || !logShown || prevTop <= 5 ? 0 : prevTop + container.scrollHeight - prevHeight;
+              logShown = true;
             }
 
             function clearFilters() {
