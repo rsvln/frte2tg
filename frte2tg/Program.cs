@@ -209,14 +209,16 @@ namespace frte2tg
             if (System.IO.File.Exists(clip))
                 return clip;
 
-            // Ended but the file isn't written yet: keep waiting for Frigate's own snapshot.
+            // Ended: Frigate serves the snapshot from its clips folder once it is written (404 until then). Getting it here
+            // means the file exists but clipspath doesn't show it (volume not mounted), so the API copy is used.
             var ev = StatsService.GetEvent(eventId);
-            if (ev != null && ev.end_time != null)
-                return null;
+            bool ended = ev != null && ev.end_time != null;
 
             var bytes = await StatsService.GetFrigateSnapshotAsync(eventId);
             if (bytes == null)
                 return null;
+            if (ended)
+                StatsService.WarnClipsPathOnce();
 
             Directory.CreateDirectory(LiveSnapshotDir);
             foreach (var old in Directory.GetFiles(LiveSnapshotDir).Where(f => System.IO.File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddDays(-1)))
@@ -224,7 +226,9 @@ namespace frte2tg
 
             string path = LiveSnapshotDir + "/" + camera + "-" + eventId + ".jpg";
             await System.IO.File.WriteAllBytesAsync(path, bytes);
-            Log(type, logId, camera, "Event " + eventId + " is still in progress, using its current snapshot from Frigate");
+            Log(type, logId, camera, ended
+                ? "Snapshot of event " + eventId + " is not in clipspath, using the one from Frigate's API"
+                : "Event " + eventId + " is still in progress, using its current snapshot from Frigate");
             return path;
         }
 

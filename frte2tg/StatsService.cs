@@ -31,16 +31,28 @@ namespace frte2tg
 
         static readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
-        // Frigate writes {camera}-{id}.jpg only when an event ends; for an event still in progress
-        // the current best frame is taken from Frigate's API. Returns null if neither is available.
+        // Frigate writes {camera}-{id}.jpg to clips only when an event ends; for an event still in progress, or when
+        // the file can't be read here (clipspath not mounted), the snapshot comes from Frigate's API.
+        // Returns null if neither is available.
         public static async Task<byte[]> GetSnapshotAsync(EventRow ev)
         {
             string path = SnapshotPath(ev.camera, ev.id);
             if (path != null)
                 return await System.IO.File.ReadAllBytesAsync(path);
-            if (ev.end_time != null)
-                return null;
-            return await GetFrigateSnapshotAsync(ev.id);
+            var bytes = await GetFrigateSnapshotAsync(ev.id);
+            if (bytes != null && ev.end_time != null)
+                WarnClipsPathOnce();
+            return bytes;
+        }
+
+        static int clipsPathWarned;
+
+        // A finished event whose snapshot Frigate serves but clipspath doesn't have: the volume is likely missing or wrong.
+        public static void WarnClipsPathOnce()
+        {
+            if (Interlocked.Exchange(ref clipsPathWarned, 1) == 0)
+                Program.Log("app", "", "", "Snapshot files are not found in frigate.clipspath (" + Program.settings.frigate.clipspath +
+                                           "), taking them from Frigate's API. Check that Frigate's clips folder is mounted there");
         }
 
         // Current best frame of an event from Frigate's HTTP API, or null if Frigate doesn't have one.
@@ -360,8 +372,10 @@ namespace frte2tg
                     zones = ParseZones(dr["zones"]),
                     has_clip = !(dr["has_clip"] is DBNull) && Convert.ToInt64(dr["has_clip"]) != 0,
                 };
-                // In-progress events get their snapshot from the Frigate API, see GetSnapshotAsync.
-                row.has_snapshot = row.end_time == null || SnapshotPath(row.camera, row.id) != null;
+                // In-progress events, and finished ones whose file isn't in clipspath, get their snapshot from the Frigate API,
+                // see GetSnapshotAsync.
+                bool frigateHasSnapshot = !(dr["has_snapshot"] is DBNull) && Convert.ToInt64(dr["has_snapshot"]) != 0;
+                row.has_snapshot = row.end_time == null || frigateHasSnapshot || SnapshotPath(row.camera, row.id) != null;
                 if (string.IsNullOrWhiteSpace(row.sub_label)) row.sub_label = null;
                 result.Add(row);
             }
