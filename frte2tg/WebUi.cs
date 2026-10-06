@@ -290,7 +290,7 @@ namespace frte2tg
             <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>frte2tg</title>
+            <title>Lookout</title>
             <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=%VERSION%">
             <style>
               @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
@@ -913,7 +913,7 @@ namespace frte2tg
 
               document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === r.view));
               document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + r.view));
-              document.title = 'frte2tg · ' + (document.querySelector(`.tab[data-tab="${r.view}"]`)?.textContent || r.id || '');
+              document.title = 'Lookout · ' + (document.querySelector(`.tab[data-tab="${r.view}"]`)?.textContent || r.id || '');
               clearInterval(lastTimer);
               const q = r.q;
 
@@ -953,7 +953,7 @@ namespace frte2tg
               const res = await fetch('/api/event/' + encodeURIComponent(id));
               if (!res.ok) { body.innerHTML = `<div class="empty">${esc(t(res.status === 404 ? 'web.no_events' : 'web.error_events'))}</div>`; return; }
               const r = await res.json();
-              document.title = 'frte2tg · ' + r.camera + ' · ' + r.label + ' · ' + r.start_local;
+              document.title = 'Lookout · ' + r.camera + ' · ' + r.label + ' · ' + r.start_local;
               body.innerHTML = `<div class="event-view">
                   ${r.has_snapshot ? `<img src="/api/snapshot/${encodeURIComponent(r.id)}" onclick="openLightbox(this.src)" alt="">` : ''}
                   ${eventCard(r)}
