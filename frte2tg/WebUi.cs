@@ -27,7 +27,9 @@ namespace frte2tg
                     context.Response.StatusCode = 401;
                 });
 
-                app.MapGet("/", () => Results.Content(Localize(GetHtml()), "text/html; charset=utf-8"));
+                // The page itself, at every address it handles (the script picks the view from the path).
+                foreach (var path in new[] { "/", "/log", "/last", "/stats", "/stats/events", "/config", "/about", "/event/{id}" })
+                    app.MapGet(path, () => Results.Content(Localize(GetHtml()), "text/html; charset=utf-8"));
 
                 app.MapGet("/api/log", (int? lines) =>
                 {
@@ -65,11 +67,13 @@ namespace frte2tg
                     var rows = camera == null
                         ? StatsService.GetLastPerCamera(Math.Clamp(limit ?? 1, 1, 50), label)
                         : StatsService.GetLast(camera, label, Math.Clamp(limit ?? 24, 1, 200));
-                    return Results.Ok(rows.Select(r => new
-                    {
-                        r.id, r.camera, r.label, r.sub_label, r.score, r.start_time, r.end_time, r.zones, r.has_snapshot, r.has_clip,
-                        start_local = StatsService.ToLocal(r.start_time).ToString("yyyy-MM-dd HH:mm:ss")
-                    }));
+                    return Results.Ok(rows.Select(EventJson));
+                }));
+
+                app.MapGet("/api/event/{id}", (string id) => Safe(() =>
+                {
+                    var ev = StatsService.GetEvent(id);
+                    return ev == null ? Results.NotFound() : Results.Ok(EventJson(ev));
                 }));
 
                 // Events behind a Stats view (same period / camera / label rules as /api/stat).
@@ -83,11 +87,7 @@ namespace frte2tg
                     return Results.Ok(new
                     {
                         total,
-                        events = rows.Select(r => new
-                        {
-                            r.id, r.camera, r.label, r.sub_label, r.score, r.start_time, r.end_time, r.zones, r.has_snapshot, r.has_clip,
-                            start_local = StatsService.ToLocal(r.start_time).ToString("yyyy-MM-dd HH:mm:ss")
-                        })
+                        events = rows.Select(EventJson)
                     });
                 }));
 
@@ -272,6 +272,12 @@ namespace frte2tg
             return html.Replace("/*I18N*/{}", System.Text.Json.JsonSerializer.Serialize(L10n.Web.Export("web.", "label.")));
         }
 
+        static object EventJson(EventRow r) => new
+        {
+            r.id, r.camera, r.label, r.sub_label, r.score, r.start_time, r.end_time, r.zones, r.has_snapshot, r.has_clip,
+            start_local = StatsService.ToLocal(r.start_time).ToString("yyyy-MM-dd HH:mm:ss")
+        };
+
         static IResult Safe(Func<IResult> f)
         {
             try { return f(); }
@@ -353,6 +359,7 @@ namespace frte2tg
               }
 
               .tab {
+                text-decoration: none;
                 padding: 6px 16px;
                 border-radius: 6px;
                 border: 1px solid transparent;
@@ -374,6 +381,11 @@ namespace frte2tg
               .panels { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
               .panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
               .panel.active { display: flex; }
+              .event-view { max-width: 1100px; }
+              .event-view img { width: 100%; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: block; }
+              .event-view .card { margin-top: 12px; }
+              .card .when a { color: inherit; text-decoration: none; }
+              .card .when a:hover { color: var(--accent); text-decoration: underline; }
 
 
               .log-toolbar {
@@ -646,11 +658,11 @@ namespace frte2tg
               <div class="dot"></div>
               <h1>Frigate TrueEnd Events and Reviews to Telegram</h1>
               <div class="tabs">
-                <button class="tab active" data-tab="log" onclick="switchTab('log')">{{web.tab.log}}</button>
-                <button class="tab" data-tab="last" onclick="switchTab('last')">{{web.tab.last}}</button>
-                <button class="tab" data-tab="stats" onclick="switchTab('stats')">{{web.tab.stats}}</button>
-                <button class="tab" data-tab="config" onclick="switchTab('config')">{{web.tab.config}}</button>
-                <button class="tab" data-tab="about" onclick="switchTab('about')">{{web.tab.about}}</button>
+                <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
+                <a class="tab" data-tab="last" href="/last">{{web.tab.last}}</a>
+                <a class="tab" data-tab="stats" href="/stats">{{web.tab.stats}}</a>
+                <a class="tab" data-tab="config" href="/config">{{web.tab.config}}</a>
+                <a class="tab" data-tab="about" href="/about">{{web.tab.about}}</a>
               </div>
             </header>
 
@@ -662,7 +674,7 @@ namespace frte2tg
                   <input type="number" id="log-lines" value="200" min="10" max="2000" style="width:70px">
                   <button class="btn" onclick="loadLog()">{{web.refresh}}</button>
                   <label>{{web.type}}</label>
-                    <select id="filter-type" onchange="applyFilters()">
+                    <select id="filter-type" onchange="navigate(logUrl())">
                       <option value="">{{web.all}}</option>
                       <option value="review">review</option>
                       <option value="event">event</option>
@@ -672,11 +684,11 @@ namespace frte2tg
                     </select>
 
                     <label>{{web.camera}}</label>
-                    <select id="filter-camera" onchange="applyFilters()"><option value="">{{web.all}}</option></select>
+                    <select id="filter-camera" onchange="navigate(logUrl())"><option value="">{{web.all}}</option></select>
 
                     <label>{{web.text}}</label>
                     <input type="text" id="filter-text" placeholder="{{web.search_placeholder}}" 
-                           oninput="applyFilters()" style="width:130px">
+                           oninput="navigate(logUrl(), true)" style="width:130px">
 
                     <button class="btn" onclick="clearFilters()">{{web.clear}}</button>
 
@@ -696,11 +708,11 @@ namespace frte2tg
               <div class="panel" id="panel-last">
                 <div class="log-toolbar">
                   <label>{{web.camera}}</label>
-                  <select id="last-camera" class="meta-camera" onchange="lastCameraChanged()"><option value="">{{web.all}}</option></select>
+                  <select id="last-camera" class="meta-camera" onchange="navigate(lastUrl({ limit: '' }))"><option value="">{{web.all}}</option></select>
                   <label>{{web.object}}</label>
-                  <select id="last-label" class="meta-label" onchange="loadLast()"><option value="">{{web.all}}</option></select>
+                  <select id="last-label" class="meta-label" onchange="navigate(lastUrl())"><option value="">{{web.all}}</option></select>
                   <label id="last-limit-label">{{web.per_camera}}</label>
-                  <select id="last-limit" onchange="loadLast()">
+                  <select id="last-limit" onchange="navigate(lastUrl())">
                     <option value="1" selected>1</option>
                     <option value="3">3</option>
                     <option value="5">5</option>
@@ -725,20 +737,27 @@ namespace frte2tg
               <div class="panel" id="panel-stats">
                 <div class="log-toolbar">
                   <label>{{web.period}}</label>
-                  <select id="stat-period" onchange="loadStats()">
+                  <select id="stat-period" onchange="navigate(statsUrl())">
                     <option value="24h" selected>{{web.period.24h}}</option>
                     <option value="today">{{web.period.today}}</option>
                     <option value="7d">{{web.period.7d}}</option>
                     <option value="30d">{{web.period.30d}}</option>
                   </select>
                   <label>{{web.camera}}</label>
-                  <select id="stat-camera" class="meta-camera" onchange="loadStats()"><option value="">{{web.all}}</option></select>
+                  <select id="stat-camera" class="meta-camera" onchange="navigate(statsUrl())"><option value="">{{web.all}}</option></select>
                   <label>{{web.object}}</label>
-                  <select id="stat-label" class="meta-label" onchange="loadStats()"><option value="config">{{web.filter_config}}</option><option value="">{{web.all}}</option></select>
+                  <select id="stat-label" class="meta-label" onchange="navigate(statsUrl())"><option value="config">{{web.filter_config}}</option><option value="">{{web.all}}</option></select>
                   <button class="btn" onclick="loadStats()">{{web.refresh}}</button>
                   <button class="btn" id="stat-back" onclick="statBack()" style="display:none">← {{web.back}}</button>
                 </div>
                 <div class="scroll" id="stats-body"></div>
+              </div>
+
+              <div class="panel" id="panel-event">
+                <div class="log-toolbar">
+                  <button class="btn" onclick="goBack('/last')">← {{web.back}}</button>
+                </div>
+                <div class="scroll" id="event-body"></div>
               </div>
 
               <div class="panel" id="panel-config">
@@ -783,57 +802,160 @@ namespace frte2tg
             <script>
             let refreshTimer = null;
 
-            // The active tab and toolbar values are kept in this browser's localStorage, so F5 restores them.
-            const STATE_KEY = 'frte2tg.ui';
-            const PERSISTED = ['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'refresh-interval',
-                               'last-camera', 'last-label', 'last-limit', 'last-refresh',
-                               'stat-period', 'stat-camera', 'stat-label'];
+            // Every view has its own address: /log, /last, /stats, /stats/events (a gallery from the stats), /event/<id>,
+            // /config, /about, with the filters in the query string. So F5 shows the same view, links can be shared and
+            // the browser's Back / Forward move between views. "/" opens the view seen last.
+            const TABS = ['log', 'last', 'stats', 'config', 'about'];
+            const val = id => document.getElementById(id).value;
 
-            function readState() {
-              try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; } catch { return {}; }
+            // Settings that are not part of a view (lines, refresh intervals) and the last address of every tab
+            // stay in this browser's localStorage.
+            const PREFS_KEY = 'frte2tg.prefs';
+            const PREFS = ['log-lines', 'refresh-interval', 'last-refresh'];
+
+            function readPrefs() {
+              try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
             }
 
-            // Camera/object lists are filled by loadMeta(); until then their saved values are kept as they are.
-            const META_FIELDS = ['last-camera', 'last-label', 'last-limit', 'stat-camera', 'stat-label'];
+            function writePrefs(update) {
+              try { localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign(readPrefs(), update))); } catch { }
+            }
 
-            function saveState() {
-              const prev = readState().fields || {};
-              const state = { tab: document.querySelector('.tab.active')?.dataset.tab || 'log', fields: {} };
-              PERSISTED.forEach(id => {
-                const el = document.getElementById(id);
-                const notFilled = (!metaLoaded && META_FIELDS.includes(id)) ||
-                                  (id === 'filter-camera' && document.getElementById(id).dataset.key === undefined);
-                if (notFilled) { if (id in prev) state.fields[id] = prev[id]; }
-                else if (el) state.fields[id] = el.type === 'checkbox' ? el.checked : el.value;
+            document.addEventListener('change', e => {
+              if (PREFS.includes(e.target.id)) writePrefs({ fields: Object.fromEntries(PREFS.map(id => [id, val(id)])) });
+            });
+
+            // A select gets the value even if the option isn't there yet (e.g. a camera from a link), so the view matches the address.
+            function setSelect(id, value) {
+              const el = document.getElementById(id);
+              if (value && ![...el.options].some(o => o.value === value))
+                el.insertAdjacentHTML('beforeend', `<option value="${esc(value)}">${esc(value)}</option>`);
+              el.value = value;
+            }
+
+            function buildUrl(path, query) {
+              const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
+              return path + (q ? '?' + q : '');
+            }
+
+            function parseRoute() {
+              const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+              const q = Object.fromEntries(new URLSearchParams(location.search));
+              if (parts[0] === 'event' && parts[1]) return { view: 'event', id: parts[1], q };
+              if (parts[0] === 'stats' && parts[1] === 'events') return { view: 'stats', gallery: true, q };
+              return { view: TABS.includes(parts[0]) ? parts[0] : 'log', q };
+            }
+
+            // Addresses built from the toolbar values; `o` overrides some of them. Defaults are left out.
+            function logUrl() {
+              return buildUrl('/log', { type: val('filter-type'), camera: val('filter-camera'), q: val('filter-text') });
+            }
+
+            function lastUrl(o = {}) {
+              const camera = o.camera ?? val('last-camera');
+              const limit = o.limit ?? val('last-limit');
+              return buildUrl('/last', { camera, label: o.label ?? val('last-label'), limit: limit === (camera ? '20' : '1') ? '' : limit });
+            }
+
+            // label: "config" (default) = what the bot sends, "all" = everything Frigate saw, otherwise one object.
+            // gallery: undefined = the numbers, {} = the events behind them, { hour } / { day } = one bar of a chart.
+            function statsUrl(o = {}, gallery) {
+              const period = o.period ?? val('stat-period');
+              const label = o.label ?? val('stat-label');
+              return buildUrl(gallery ? '/stats/events' : '/stats', {
+                period: period === '24h' ? '' : period,
+                camera: o.camera ?? val('stat-camera'),
+                label: label === 'config' ? '' : label === '' ? 'all' : label,
+                hour: gallery?.hour, day: gallery?.day
               });
-              try { localStorage.setItem(STATE_KEY, JSON.stringify(state)); } catch { }
             }
 
-            // Selects get a saved value only if they have such an option (camera lists come from /api/meta).
-            function restoreFields(ids) {
-              const fields = readState().fields || {};
-              ids.forEach(id => {
-                const el = document.getElementById(id);
-                if (!el || !(id in fields)) return;
-                if (el.type === 'checkbox') el.checked = !!fields[id];
-                else if (el.tagName !== 'SELECT' || [...el.options].some(o => o.value === fields[id])) el.value = fields[id];
-              });
+            // history.state.n counts the views opened in this tab, so "Back" can tell whether there is one to return to.
+            let navIndex = history.state?.n ?? 0;
+
+            function navigate(url, replace) {
+              if (url !== location.pathname + location.search) {
+                if (replace) history.replaceState({ n: navIndex }, '', url);
+                else history.pushState({ n: ++navIndex }, '', url);
+              }
+              return render();
             }
 
-            document.addEventListener('change', e => { if (PERSISTED.includes(e.target.id)) saveState(); });
-            document.addEventListener('input', e => { if (PERSISTED.includes(e.target.id)) saveState(); });
+            window.addEventListener('popstate', e => { navIndex = e.state?.n ?? 0; render(); });
 
-            function switchTab(name) {
-              if (!document.getElementById('panel-' + name)) name = 'log';
-              document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-              document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-              document.getElementById('panel-' + name).classList.add('active');
-              saveState();
-              if (name === 'config') loadConfig();
+            // "Back" buttons of the page: the previous view if this tab came from one, otherwise the parent view.
+            function goBack(parentUrl) {
+              if (navIndex > 0) history.back();
+              else navigate(parentUrl, true);
+            }
+
+            // Tabs and links inside the page change the view without reloading it; a tab opens where it was left,
+            // a click on the open tab goes to its start.
+            document.addEventListener('click', e => {
+              const a = e.target.closest('a[href^="/"]');
+              if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || a.target || a.hasAttribute('download')) return;
+              const url = new URL(a.href);
+              if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/js/')) return;
+              e.preventDefault();
+              const tab = a.dataset.tab;
+              if (tab) navigate(parseRoute().view === tab ? '/' + tab : (readPrefs().urls || {})[tab] || '/' + tab);
+              else navigate(url.pathname + url.search);
+            });
+
+            async function render() {
+              const r = parseRoute();
+              const url = location.pathname + location.search;
+              const urls = readPrefs().urls || {};
+              if (r.view !== 'event') urls[r.view] = url;
+              writePrefs({ urls, last: url });
+
+              document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === r.view));
+              document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + r.view));
+              document.title = 'frte2tg · ' + (document.querySelector(`.tab[data-tab="${r.view}"]`)?.textContent || r.id || '');
               clearInterval(lastTimer);
-              if (name === 'last') { loadMeta().then(loadLast); setLastRefresh(); }
-              if (name === 'stats') loadMeta().then(loadStats);
-              if (name === 'about') loadAbout();
+              const q = r.q;
+
+              if (r.view === 'log') {
+                setSelect('filter-type', q.type || '');
+                setSelect('filter-camera', q.camera || '');
+                document.getElementById('filter-text').value = q.q || '';
+                applyFilters();
+              } else if (r.view === 'last') {
+                await loadMeta();
+                setSelect('last-camera', q.camera || '');
+                setSelect('last-label', q.label || '');
+                setSelect('last-limit', q.limit || (q.camera ? '20' : '1'));
+                updateLastLimitLabel();
+                loadLast();
+                setLastRefresh();
+              } else if (r.view === 'stats') {
+                await loadMeta();
+                setSelect('stat-period', q.period || '24h');
+                setSelect('stat-camera', q.camera || '');
+                setSelect('stat-label', q.label === undefined ? 'config' : q.label === 'all' ? '' : q.label);
+                statGallery = r.gallery ? { hour: q.hour === undefined ? undefined : parseInt(q.hour), day: q.day } : false;
+                loadStats();
+              } else if (r.view === 'event') {
+                loadEvent(r.id);
+              } else if (r.view === 'config') {
+                loadConfig();
+              } else if (r.view === 'about') {
+                loadAbout();
+              }
+            }
+
+            // One event: the snapshot at full width, its card with the video buttons below.
+            async function loadEvent(id) {
+              const body = document.getElementById('event-body');
+              body.innerHTML = '';
+              const res = await fetch('/api/event/' + encodeURIComponent(id));
+              if (!res.ok) { body.innerHTML = `<div class="empty">${esc(t(res.status === 404 ? 'web.no_events' : 'web.error_events'))}</div>`; return; }
+              const r = await res.json();
+              document.title = 'frte2tg · ' + r.camera + ' · ' + r.label + ' · ' + r.start_local;
+              body.innerHTML = `<div class="event-view">
+                  ${r.has_snapshot ? `<img src="/api/snapshot/${encodeURIComponent(r.id)}" onclick="openLightbox(this.src)" alt="">` : ''}
+                  ${eventCard(r)}
+                </div>`;
             }
 
             const I18N = /*I18N*/{};
@@ -854,11 +976,7 @@ namespace frte2tg
               fill('.meta-camera', meta.cameras, v => v);
               fill('.meta-label', meta.labels, labelName);
               // Stats default to what the bot is configured to send.
-              const statLabel = document.getElementById('stat-label');
-              statLabel.insertAdjacentHTML('afterbegin', '<option value="config">{{web.filter_config}}</option>');
-              statLabel.value = 'config';
-              restoreFields(META_FIELDS);
-              updateLastLimitLabel();
+              document.getElementById('stat-label').insertAdjacentHTML('afterbegin', '<option value="config">{{web.filter_config}}</option>');
               metaLoaded = true;
             }
 
@@ -881,14 +999,6 @@ namespace frte2tg
             function updateLastLimitLabel() {
               const cam = document.getElementById('last-camera').value;
               document.getElementById('last-limit-label').textContent = cam ? t('web.events_limit') : t('web.per_camera');
-            }
-
-            function lastCameraChanged() {
-              const cam = document.getElementById('last-camera').value;
-              updateLastLimitLabel();
-              document.getElementById('last-limit').value = cam ? '20' : '1';
-              saveState();
-              loadLast();
             }
 
             async function loadLast() {
@@ -932,7 +1042,7 @@ namespace frte2tg
                     <div class="row1"><span class="lbl">${esc(labelName(r.label))}${r.sub_label ? ` <span class="sub">(${esc(r.sub_label)})</span>` : ''}</span>
                       <span class="score">${Math.round(r.score * 100)}%</span></div>
                     <div class="row1"><span class="cam">${esc(r.camera)}${r.end_time === null ? ` <span class="live">● ${esc(t('web.in_progress'))}</span>` : ''}</span>
-                      <span class="when" title="${esc(r.start_local)}">${esc(r.start_local.slice(5, 16))} · ${ago(r.start_time)}</span></div>
+                      <span class="when" title="${esc(r.start_local)}"><a href="/event/${encodeURIComponent(r.id)}">${esc(r.start_local.slice(5, 16))} · ${ago(r.start_time)}</a></span></div>
                     ${r.zones.length ? `<div class="zones">${esc(r.zones.join(', '))}</div>` : ''}
                     <div class="actions">
                       <button class="act" data-id="${esc(r.id)}" onclick="openVideo(this.dataset.id)">${ICON_PLAY} ${esc(t('web.video'))}</button>
@@ -1001,17 +1111,9 @@ namespace frte2tg
             }
 
             function filterStats(camera, label) {
-              if (camera !== undefined) document.getElementById('stat-camera').value = camera;
-              if (label !== undefined) document.getElementById('stat-label').value = label;
-              saveState();
-              loadStats();
+              navigate(statsUrl({ camera, label }));
             }
 
-            // Filter history for the "Back" button: every change of period, camera or object is a step.
-            // With no history (e.g. a filter restored after F5) "Back" leads to the overview: all cameras,
-            // objects as in the config, same period.
-            const statHistory = [];
-            let statShown = null;
             // The gallery of the events behind the current Stats view, optionally narrowed to one hour of day
             // ({ hour }) or one day ({ day }); false = the numbers. "Back" returns to the numbers.
             let statGallery = false;
@@ -1025,8 +1127,7 @@ namespace frte2tg
             }
 
             function openStatGallery(extra) {
-              statGallery = extra || {};
-              loadStats();
+              navigate(statsUrl({}, extra || {}));
             }
 
             const statHourClick = h => openStatGallery({ hour: h });
@@ -1067,25 +1168,14 @@ namespace frte2tg
               return filter.join('|') === statOverview(filter).join('|');
             }
 
-            async function statBack() {
-              if (statGallery) { statGallery = false; await loadStats(); return; }
-              const prev = statHistory.pop() ?? (isStatOverview(statFilter()) ? null : statOverview(statFilter()));
-              if (!prev) return;
-              ['stat-period', 'stat-camera', 'stat-label'].forEach((id, i) => document.getElementById(id).value = prev[i]);
-              statShown = prev;
-              saveState();
-              await loadStats();
+            // The previous view, or with none in this tab: from a gallery to its numbers, from a filtered view to the overview.
+            function statBack() {
+              goBack(statGallery ? statsUrl() : statsUrl({ camera: '', label: 'config' }));
             }
 
             async function loadStats() {
               const current = statFilter();
-              if (statShown && current.join('|') !== statShown.join('|')) {
-                statHistory.push(statShown);
-                if (statHistory.length > 30) statHistory.shift();
-                statGallery = false;
-              }
-              statShown = current;
-              document.getElementById('stat-back').style.display = statGallery || statHistory.length || !isStatOverview(current) ? '' : 'none';
+              document.getElementById('stat-back').style.display = statGallery || navIndex > 0 || !isStatOverview(current) ? '' : 'none';
               if (statGallery) return loadStatGallery();
               const p = new URLSearchParams({ period: document.getElementById('stat-period').value });
               const cam = document.getElementById('stat-camera').value;
@@ -1151,10 +1241,10 @@ namespace frte2tg
             }
 
             // Cameras met in the loaded log lines. The camera column also holds Telegram chat ids (numbers), those are skipped.
-            // The selected camera (or the one restored after F5) stays in the list even if its lines scrolled out.
+            // The selected camera (also one from the address) stays in the list even if its lines scrolled out.
             function fillLogCameras() {
               const sel = document.getElementById('filter-camera');
-              const current = sel.value || (sel.dataset.key === undefined ? (readState().fields || {})['filter-camera'] || '' : '');
+              const current = sel.value;
               const cams = new Set();
               allLines.forEach(l => { const c = l.split('\t')[3]; if (c && !/^-?\d+$/.test(c)) cams.add(c); });
               if (current) cams.add(current);
@@ -1193,10 +1283,7 @@ namespace frte2tg
             }
 
             function clearFilters() {
-              document.getElementById('filter-type').value = '';
-              document.getElementById('filter-camera').value = '';
-              document.getElementById('filter-text').value = '';
-              applyFilters();
+              navigate('/log');
             }
 
             const EVENT_COLORS = [
@@ -1336,11 +1423,20 @@ namespace frte2tg
             }
 
 
-            restoreFields(['log-lines', 'filter-type', 'filter-camera', 'filter-text', 'refresh-interval',
-                           'last-refresh', 'stat-period']);
-            loadLog();
-            setRefresh();
-            switchTab(readState().tab || 'log');
+            // Start: settings from this browser (taken over once from the old 'frte2tg.ui' state), then the view of the address.
+            (() => {
+              let fields = readPrefs().fields;
+              if (!fields) {
+                try { fields = (JSON.parse(localStorage.getItem('frte2tg.ui')) || {}).fields; } catch { }
+                if (fields) writePrefs({ fields });
+              }
+              PREFS.forEach(id => { if (fields && id in fields) document.getElementById(id).value = fields[id]; });
+              const start = location.pathname === '/' ? readPrefs().last || '/log' : location.pathname + location.search;
+              history.replaceState({ n: navIndex }, '', start);
+              loadLog();
+              setRefresh();
+              render();
+            })();
 
             // Result of "apply" that reloaded the page for a new language.
             try {
