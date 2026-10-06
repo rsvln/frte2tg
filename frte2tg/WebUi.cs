@@ -198,7 +198,7 @@ namespace frte2tg
                 app.MapPost("/api/apply", () => ApplyAsync(configPath));
 
                 // Polled by the page after applying settings, until MQTT is connected again.
-                app.MapGet("/api/status", () => Results.Ok(new { version = VersionInfo.Version, mqtt = Program.mqttClient?.IsConnected == true }));
+                app.MapGet("/api/status", () => Results.Ok(new { version = VersionInfo.Version, mqtt = Program.mqttClient?.IsConnected == true, locale = L10n.Web.Locale }));
 
                 app.Run();
             });
@@ -267,7 +267,8 @@ namespace frte2tg
             html = System.Text.RegularExpressions.Regex.Replace(html, @"\{\{([\w.]+)\}\}", m => System.Net.WebUtility.HtmlEncode(L10n.Web.T(m.Groups[1].Value)));
             html = html.Replace("%VERSION%", System.Net.WebUtility.HtmlEncode(VersionInfo.Version))
                        .Replace("%BUILD%", System.Net.WebUtility.HtmlEncode(VersionInfo.BuildDate))
-                       .Replace("%URL%", VersionInfo.ProjectUrl);
+                       .Replace("%URL%", VersionInfo.ProjectUrl)
+                       .Replace("%WEBLOCALE%", System.Net.WebUtility.HtmlEncode(L10n.Web.Locale));
             return html.Replace("/*I18N*/{}", System.Text.Json.JsonSerializer.Serialize(L10n.Web.Export("web.", "label.")));
         }
 
@@ -1280,16 +1281,27 @@ namespace frte2tg
               return false;
             }
 
-            // After applying, waits until the service is back on MQTT (up to 20 s).
+            // Language the page was rendered in; its texts come from the server, so another one needs a reload.
+            const PAGE_LOCALE = '%WEBLOCALE%';
+
+            // After applying, waits until the service is back on MQTT (up to 20 s). If the web UI language changed,
+            // reloads the page and shows the result there.
             async function waitForService() {
-              for (let i = 0; i < 20; i++) {
+              let st = {};
+              for (let i = 0; i < 20 && !st.mqtt; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, 1000));
                 try {
                   const res = await fetch('/api/status');
-                  if (res.ok && (await res.json()).mqtt) { showToast(t('web.config.applied'), 'ok'); return; }
+                  if (res.ok) st = await res.json();
                 } catch { }
-                await new Promise(r => setTimeout(r, 1000));
               }
-              showToast(t('web.config.applied_nomqtt'), 'err');
+              const result = st.mqtt ? 'applied' : 'applied_nomqtt';
+              if (st.locale && st.locale !== PAGE_LOCALE) {
+                try { sessionStorage.setItem('frte2tg.toast', result); } catch { }
+                location.reload();
+                return;
+              }
+              showToast(t('web.config.' + result), st.mqtt ? 'ok' : 'err');
             }
 
             async function saveConfig(apply) {
@@ -1329,6 +1341,15 @@ namespace frte2tg
             loadLog();
             setRefresh();
             switchTab(readState().tab || 'log');
+
+            // Result of "apply" that reloaded the page for a new language.
+            try {
+              const pending = sessionStorage.getItem('frte2tg.toast');
+              if (pending) {
+                sessionStorage.removeItem('frte2tg.toast');
+                showToast(t('web.config.' + pending), pending === 'applied' ? 'ok' : 'err');
+              }
+            } catch { }
             </script>
             </body>
             </html>
