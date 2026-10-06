@@ -1,4 +1,5 @@
 ﻿using Telegram.Bot.Types;
+using YamlDotNet.Core;
 
 namespace frte2tg
 {
@@ -144,11 +145,46 @@ namespace frte2tg
         public int retry { get; set; } = 10;
         public bool sendeverythingwhatyouhave { get; set; } = true;
         public int gifwidth { get; set; } = 640;     
-        public string locale { get; set; } = "en";
-        // Optional per-area languages; empty = locale.
-        public string weblocale { get; set; }
-        public string telegramlocale { get; set; }
-        public string ailocale { get; set; }
+        public LocaleSettings locale { get; set; } = new LocaleSettings();
+    }
+
+    // options.locale: one language for everything ("locale: ru") or one per area:
+    //   locale:
+    //     web: en
+    //     telegram: ru
+    //     ai: ru
+    // Areas left out are English.
+    public class LocaleSettings : YamlDotNet.Serialization.IYamlConvertible
+    {
+        public string web { get; set; } = "en";
+        public string telegram { get; set; } = "en";
+        public string ai { get; set; } = "en";
+        // The AI language was given explicitly (as locale.ai); only then prompts get "answer in <language>".
+        public bool aiExplicit { get; private set; }
+
+        class Areas
+        {
+            public string web { get; set; }
+            public string telegram { get; set; }
+            public string ai { get; set; }
+        }
+
+        public void Read(YamlDotNet.Core.IParser parser, Type expectedType, YamlDotNet.Serialization.ObjectDeserializer nestedObjectDeserializer)
+        {
+            if (parser.TryConsume<YamlDotNet.Core.Events.Scalar>(out var scalar))
+            {
+                web = telegram = ai = string.IsNullOrWhiteSpace(scalar.Value) ? "en" : scalar.Value.Trim();
+                return;
+            }
+            var areas = (Areas)nestedObjectDeserializer(typeof(Areas)) ?? new Areas();
+            web = string.IsNullOrWhiteSpace(areas.web) ? "en" : areas.web.Trim();
+            telegram = string.IsNullOrWhiteSpace(areas.telegram) ? "en" : areas.telegram.Trim();
+            ai = string.IsNullOrWhiteSpace(areas.ai) ? "en" : areas.ai.Trim();
+            aiExplicit = !string.IsNullOrWhiteSpace(areas.ai);
+        }
+
+        public void Write(YamlDotNet.Core.IEmitter emitter, YamlDotNet.Serialization.ObjectSerializer nestedObjectSerializer) =>
+            nestedObjectSerializer(new Areas { web = web, telegram = telegram, ai = ai });
     }
 
     public class LoggerSettings

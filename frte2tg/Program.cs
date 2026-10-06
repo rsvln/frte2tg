@@ -64,9 +64,8 @@ namespace frte2tg
 
         public static async Task Initialize()
         {
-            var o = settings.options;
-            string Or(string l) => string.IsNullOrWhiteSpace(l) ? o.locale : l;
-            L10n.Load(Or(o.weblocale), Or(o.telegramlocale), Or(o.ailocale));
+            var loc = settings.options?.locale ?? new LocaleSettings();
+            L10n.Load(loc.web, loc.telegram, loc.ai);
             Log("app", "", "", "Languages: web " + L10n.Web.Locale + ", telegram " + L10n.Tg.Locale + ", ai " + L10n.Ai.Locale);
 
             if (goAI) { aiQueue.Stop(); goAI = false; }
@@ -190,14 +189,14 @@ namespace frte2tg
         }
 
         // AI prompt for a snapshot: the config's prompt, or the AI language's default one. "Answer in <language>" is added
-        // only when options.ailocale is set explicitly, so a prompt written in its own language keeps working as before.
+        // only when options.locale.ai is set explicitly, so a prompt written in its own language keeps working as before.
         static string AiPrompt(bool person)
         {
             string prompt = person ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
             if (string.IsNullOrWhiteSpace(prompt))
                 prompt = L10n.Ai.T(person ? "ai.prompt.human" : "ai.prompt.nonhuman");
             prompt = prompt.Trim();
-            return string.IsNullOrWhiteSpace(settings.options?.ailocale) ? prompt : prompt + " " + L10n.Ai.T("ai.reply_language");
+            return settings.options?.locale?.aiExplicit == true ? prompt + " " + L10n.Ai.T("ai.reply_language") : prompt;
         }
 
         static string LiveSnapshotDir => appLocation + "/live";
