@@ -1042,7 +1042,7 @@ namespace frte2tg
                     <div class="row1"><span class="lbl">${esc(labelName(r.label))}${r.sub_label ? ` <span class="sub">(${esc(r.sub_label)})</span>` : ''}</span>
                       <span class="score">${Math.round(r.score * 100)}%</span></div>
                     <div class="row1"><span class="cam">${esc(r.camera)}${r.end_time === null ? ` <span class="live">● ${esc(t('web.in_progress'))}</span>` : ''}</span>
-                      <span class="when" title="${esc(r.start_local)}"><a href="/event/${encodeURIComponent(r.id)}">${esc(r.start_local.slice(5, 16))} · ${ago(r.start_time)}</a></span></div>
+                      <span class="when" title="${esc(ago(r.start_time))}"><a href="/event/${encodeURIComponent(r.id)}">${esc(r.start_local)}</a></span></div>
                     ${r.zones.length ? `<div class="zones">${esc(r.zones.join(', '))}</div>` : ''}
                     <div class="actions">
                       <button class="act" data-id="${esc(r.id)}" onclick="openVideo(this.dataset.id)">${ICON_PLAY} ${esc(t('web.video'))}</button>
