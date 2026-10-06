@@ -186,7 +186,7 @@ When the `ai` section is present and `url`/`model` are set, enabling `ai: true` 
 1. Send all snapshots to Ollama after posting to Telegram
 2. Edit the Telegram message caption with AI descriptions for each snapshot
 
-Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. Without them, the default prompts of the `ailocale` language are used. Every prompt ends with "answer in <ailocale language>", so descriptions come in that language whatever language the prompt is written in. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
+Uses the `humanprompt` if Frigate detected a person, `nonhumanprompt` otherwise. Without them, the default prompts of the `ailocale` language are used. When `options.ailocale` is set, every prompt ends with "answer in <ailocale language>", so descriptions come in that language whatever language the prompt is written in; without it the prompts are sent as written. If face recognition is also enabled, recognized names are prepended to the prompt automatically.
 
 Snapshots wider than `resizetowidth` are downscaled with ffmpeg before being sent to Ollama.
 

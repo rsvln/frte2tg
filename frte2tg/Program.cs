@@ -189,13 +189,15 @@ namespace frte2tg
             }
         }
 
-        // AI prompt for a snapshot: the config's prompt (or the AI language's default one) plus "answer in <AI language>".
+        // AI prompt for a snapshot: the config's prompt, or the AI language's default one. "Answer in <language>" is added
+        // only when options.ailocale is set explicitly, so a prompt written in its own language keeps working as before.
         static string AiPrompt(bool person)
         {
             string prompt = person ? settings.ai?.humanprompt : settings.ai?.nonhumanprompt;
             if (string.IsNullOrWhiteSpace(prompt))
                 prompt = L10n.Ai.T(person ? "ai.prompt.human" : "ai.prompt.nonhuman");
-            return prompt.Trim() + " " + L10n.Ai.T("ai.reply_language");
+            prompt = prompt.Trim();
+            return string.IsNullOrWhiteSpace(settings.options?.ailocale) ? prompt : prompt + " " + L10n.Ai.T("ai.reply_language");
         }
 
         static string LiveSnapshotDir => appLocation + "/live";
