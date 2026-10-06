@@ -1,3 +1,7 @@
+> **This project has been renamed to Lookout and moved to [github.com/rsvln/lookout](https://github.com/rsvln/lookout).**  
+> Docker images: `rsvln/lookout`, `ghcr.io/rsvln/lookout`. This repository is kept for history and is no longer updated.  
+> **Проект переименован в Lookout и переехал в [github.com/rsvln/lookout](https://github.com/rsvln/lookout).** Этот репозиторий оставлен для истории и больше не обновляется.
+
 Основная задача сервиса - дождаться завершения записи видео по событию на диск и отправить его в телеграм, в том числе разбив его на части, в случае необходимости. Исходники <a href="https://github.com/rsvln/frte2tg">тут</a><br><br>
 
 # frte2tg
