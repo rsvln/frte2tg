@@ -339,6 +339,8 @@ namespace frte2tg
                 letter-spacing: 0.05em;
               }
 
+              header h1 a { color: inherit; text-decoration: none; }
+
               header .dot {
                 width: 8px; height: 8px;
                 border-radius: 50%;
@@ -656,7 +658,7 @@ namespace frte2tg
 
             <header>
               <div class="dot"></div>
-              <h1>Frigate TrueEnd Events and Reviews to Telegram</h1>
+              <h1><a href="/log">Frigate Lookout</a></h1>
               <div class="tabs">
                 <a class="tab" data-tab="log" href="/log">{{web.tab.log}}</a>
                 <a class="tab" data-tab="last" href="/last">{{web.tab.last}}</a>
